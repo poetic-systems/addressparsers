@@ -136,8 +136,7 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 //
 // Confidence decides, and coverage breaks ties: between two equally confident
 // readings the one stranding fewer tokens is the better account of the input.
-// Reference data enters only as a demotion, never as a promotion — see
-// demoted.
+// Reference data moves a reading one step in either direction — see agreement.
 func (p *Parser) choose(candidates []*address.CandidateAddress) *address.CandidateAddress {
 	type ranked struct {
 		candidate *address.CandidateAddress
@@ -150,8 +149,13 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 			continue
 		}
 		score := c.Confidence
-		if p.opts.UseReferenceData && p.demoted(c.Address) {
-			score = weaken(score)
+		if p.opts.UseReferenceData {
+			switch p.agreement(c.Address) {
+			case contradicts:
+				score = weaken(score)
+			case agrees:
+				score = strengthen(score)
+			}
 		}
 		scored = append(scored, ranked{candidate: c, score: score})
 	}
@@ -168,34 +172,52 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 	return scored[0].candidate
 }
 
-// demoted reports whether the reference data positively contradicts a reading.
+// agreement is what the reference data had to say about a reading.
+type agreement int
+
+const (
+	// unknown is the answer whenever the data was not consulted, could not be
+	// consulted, or declined to answer. It is not evidence either way.
+	unknown agreement = iota
+	// agrees means the data may hold this pairing.
+	agrees
+	// contradicts means the data definitively does not hold it.
+	contradicts
+)
+
+// agreement asks zipcity about a reading and reports which way the answer cuts.
 //
-// Only a false answer from zipcity is actionable. Its filters are bloom
-// filters, so a false is definitive — the key was never added — while a true
-// merely means the key may be present and some trues are collisions. A parser
-// that promoted on true would be ranking on noise, and would produce confident
-// wrong answers rather than uncertain right ones. So this function can lower a
-// candidate and has no way to raise one.
+// Both answers are evidence, and they are not symmetric. zipcity answers from
+// bloom filters built at a 0.01 false positive rate, so a false is definitive —
+// the key was never added — while a true is a likelihood ratio of about 100:1
+// in favour of the pairing rather than a confirmation of it. Both move a
+// candidate by one step and neither settles it: querying several mutually
+// exclusive readings that are all genuinely absent yields a spurious true about
+// 1-0.99^k of the time, so a true must not be allowed to resolve a reading on
+// its own, and must never be reported to a caller as verification.
 //
-// A contradiction is still not proof the address is wrong. zipcity is built
+// A contradiction is likewise not proof the address is wrong. zipcity is built
 // from Census TIGER files with documented gaps, so a real address the Census
 // missed lands here too. That is why the answer is one step of confidence
 // rather than rejection, and why UseReferenceData is off by default.
-func (p *Parser) demoted(a *address.Address) bool {
+func (p *Parser) agreement(a *address.Address) agreement {
 	m := zip5.FindStringSubmatch(a.Postal)
 	if m == nil || a.City == "" {
 		// Nothing to ask about. An address the data cannot be consulted for is
-		// not thereby a worse reading.
-		return false
+		// not thereby a better or a worse reading.
+		return unknown
 	}
 
 	present, err := zipcity.CheckZipAndCity(m[1], a.City)
 	if err != nil {
 		// zipcity declined the inputs rather than answering about them. That is
 		// a question this parser could not ask, not an answer it received.
-		return false
+		return unknown
 	}
-	return !present
+	if present {
+		return agrees
+	}
+	return contradicts
 }
 
 // weaken lowers a confidence by one step on the shared scale, stopping at the
@@ -210,5 +232,26 @@ func weaken(c claim.Confidence) claim.Confidence {
 		return claim.ConfidenceWeak
 	default:
 		return c
+	}
+}
+
+// strengthen raises a confidence by one step, stopping below ConfidenceExact.
+//
+// The cap is the point. ConfidenceExact means a vocabulary had exactly one
+// reading of the tokens, which is a claim about the grammar that reference data
+// is in no position to make. A filter that may answer true by collision must
+// not be able to manufacture certainty, so agreement can carry a reading up to
+// ConfidenceStrong and no further. A candidate already at ConfidenceExact keeps
+// it — agreement never lowers a reading it supports.
+func strengthen(c claim.Confidence) claim.Confidence {
+	switch {
+	case c >= claim.ConfidenceStrong:
+		return c
+	case c >= claim.ConfidenceLikely:
+		return claim.ConfidenceStrong
+	case c >= claim.ConfidenceWeak:
+		return claim.ConfidenceLikely
+	default:
+		return claim.ConfidenceWeak
 	}
 }

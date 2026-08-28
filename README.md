@@ -66,10 +66,12 @@ p := parser.New(parser.AddressParsingOptions{
 of the standard, and its answers depend only on its input — which is what makes
 its behaviour reproducible from the specification alone.
 
-**Reference data can only demote a candidate, never promote one.** See the
-bloom filter note below; a parser that ranked readings upward on a possible
-false positive would produce confident wrong answers instead of uncertain right
-ones.
+**Reference data moves a candidate one step, in either direction, and never
+settles it.** `zipcity`'s filters are built at a 0.01 false positive rate, so a
+`false` is definitive while a `true` is roughly 100:1 evidence rather than a
+confirmation. Both are worth acting on. Neither is proof: agreement stops below
+`ConfidenceExact`, because a reading that is certain is a claim about the
+grammar that reference data is in no position to make.
 
 **Coverage today:** PO box, rural route, and military addresses parse. An
 ordinary street address returns `ErrNoReading`, because the address type that
@@ -100,8 +102,9 @@ p := parser.New(parser.AddressParsingOptions{
 
 **It only ever rejects.** `zipcity` answers from bloom filters, which have
 one-sided error: a false is definitive, a true only means "possibly present".
-There is no confirmation to be had from this data, and the package offers none
-so that no caller can mistake a true for one.
+A true is still evidence, but a verifier is the wrong place to spend it — it
+returns an address or an error, so the only thing it could do with a true is
+call the address real. Weighing a true instead of trusting it is `parse`'s job.
 
 **Absent is not invalid.** A definitive false means a pairing is missing from a
 dataset built from Census TIGER files, and `zipcity` documents real gaps in
@@ -117,8 +120,7 @@ Assembling the pipeline is arrangement of parts that already exist. Choosing
 among candidates is not, and it is the step go-projectusat leaves open
 ([#61](https://github.com/PortobelloAuth/go-projectusat/issues/61)) precisely
 because the standard cannot specify it. Ranking currently goes on confidence,
-then on coverage, then on a one-step demotion from contradicting reference
-data. Cases like `3253 W 9200 S` — does the street name end at `S` or `SW`? —
+then on coverage, with a one-step adjustment either way from reference data. Cases like `3253 W 9200 S` — does the street name end at `S` or `SW`? —
 need the adjudicator to consult the data mid-reading rather than after it, and
 that is the next real piece.
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser"
+	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
 	"github.com/poetic-systems/addressparsers/parse"
 )
 
@@ -109,7 +110,7 @@ func TestReferenceDataDemotesButDoesNotReject(t *testing.T) {
 }
 
 // Turning reference data on must not change a reading the data agrees with.
-func TestReferenceDataLeavesAnAgreedReadingAlone(t *testing.T) {
+func TestAgreementDoesNotChangeTheChosenReading(t *testing.T) {
 	source := "PO BOX 11890\nWEST JORDAN UT 84088"
 
 	plain, err := parse.New(parse.Options{}).Parse(source)
@@ -137,5 +138,48 @@ func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
 		if strings.Contains(err.Error(), part) {
 			t.Errorf("the error text leaks %q: %v", part, err)
 		}
+	}
+}
+
+// Reference data may raise a reading, but it may not make one certain.
+//
+// ConfidenceExact means a vocabulary had exactly one reading of the tokens.
+// zipcity's filters answer true by collision about one time in a hundred, so
+// letting agreement reach Exact would let a collision manufacture the strongest
+// claim the scale can express. See go-projectusat#71.
+func TestAgreementCannotManufactureCertainty(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from claim.Confidence
+		want claim.Confidence
+	}{
+		{"weak rises to likely", claim.ConfidenceWeak, claim.ConfidenceLikely},
+		{"likely rises to strong", claim.ConfidenceLikely, claim.ConfidenceStrong},
+		{"strong stops below exact", claim.ConfidenceStrong, claim.ConfidenceStrong},
+		{"exact is kept, not lowered", claim.ConfidenceExact, claim.ConfidenceExact},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parse.Strengthen(tc.from); got != tc.want {
+				t.Errorf("Strengthen(%d) = %d, want %d", tc.from, got, tc.want)
+			}
+		})
+	}
+}
+
+// A step up and a step down are not required to cancel, but neither may run
+// away: repeated agreement must not climb past the cap, and repeated
+// contradiction must not fall below the floor.
+func TestTheStepsAreBounded(t *testing.T) {
+	up := claim.ConfidenceWeak
+	down := claim.ConfidenceExact
+	for range 10 {
+		up = parse.Strengthen(up)
+		down = parse.Weaken(down)
+	}
+	if up != claim.ConfidenceStrong {
+		t.Errorf("repeated agreement reached %d, want %d", up, claim.ConfidenceStrong)
+	}
+	if down != claim.ConfidenceWeak {
+		t.Errorf("repeated contradiction reached %d, want %d", down, claim.ConfidenceWeak)
 	}
 }
