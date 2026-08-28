@@ -22,8 +22,18 @@ stays a clean implementation of the standard with seams for both.
 
 ## The seams
 
-`go-projectusat` exposes two extension points through
-`parser.AddressParsingOptions`:
+`go-projectusat` implements the standard and exports every part of it:
+`token.Tokenize`, a `Claims` function on each vocabulary (`country`, `region`,
+`postalcode`, `directionals`, `streetsuffixes`, `secondaryunit`, `highways`),
+`lastline.LineClaims`, a `Candidates` function on each address type, and
+`claim.Compare` / `Overlaps` / `Gaps` for reasoning about the results.
+
+So a parser here is not a reimplementation. It composes those parts and adds
+the one step the standard cannot specify: choosing among readings that are all
+grammatically valid. That choice is data dependent, which is why it lives with
+the data rather than with the specification.
+
+The finished parser plugs back in through `parser.AddressParsingOptions`:
 
 ```go
 type AddressParsingOptions struct {
@@ -32,11 +42,43 @@ type AddressParsingOptions struct {
 }
 ```
 
-`CustomParser` replaces parsing wholesale — that is the seam
-`parser/libpostalhttp` uses. `Verifier` judges a finished reading. Everything
-in this repository targets one of the two.
-
 ## Packages
+
+### `parse`
+
+The parser. It runs go-projectusat's pipeline — tokenize, let every vocabulary
+claim what it recognizes, read the last line from those claims, ask each address
+type for its reading of the whole — and then chooses among the readings,
+consulting `zipcity` when the grammar alone cannot settle one.
+
+```go
+import (
+	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser"
+	"github.com/poetic-systems/addressparsers/parse"
+)
+
+p := parser.New(parser.AddressParsingOptions{
+	CustomParser: parse.New(parse.Options{UseReferenceData: true}),
+})
+```
+
+`UseReferenceData` is off by default. With it off the parser is a pure reading
+of the standard, and its answers depend only on its input — which is what makes
+its behaviour reproducible from the specification alone.
+
+**Reference data can only demote a candidate, never promote one.** See the
+bloom filter note below; a parser that ranked readings upward on a possible
+false positive would produce confident wrong answers instead of uncertain right
+ones.
+
+**Coverage today:** PO box, rural route, and military addresses parse. An
+ordinary street address returns `ErrNoReading`, because the address type that
+would read it is decided but unbuilt
+([go-projectusat#56](https://github.com/PortobelloAuth/go-projectusat/issues/56)),
+and Puerto Rico addresses are waiting on
+[#60](https://github.com/PortobelloAuth/go-projectusat/issues/60). A missing
+address type produces no candidate, which is exactly how a type declines to
+read an address it does not fit.
 
 ### `zipcityverify`
 
@@ -69,16 +111,16 @@ person a matching system must not drop, so every check is opt-in and the zero
 
 ## Status
 
-Early. `zipcityverify` is the first strategy and exercises the `Verifier` seam
-end to end.
+Early, and the interesting work is the adjudicator in `parse`.
 
-The seam that is *not* yet settled is the interesting one. `zipcity`'s value is
-largest mid-parse — deciding whether `3253 W 9200 S` ends at `S` or `SW`, or
-ranking competing `CandidateAddress` readings — and neither `Verifier` nor
-`CustomParser` reaches there. Wiring reference data in as a `CustomParser` would
-mean reimplementing the claim machinery outside `go-projectusat`, which is the
-wrong trade. See
-[go-projectusat#61](https://github.com/PortobelloAuth/go-projectusat/issues/61).
+Assembling the pipeline is arrangement of parts that already exist. Choosing
+among candidates is not, and it is the step go-projectusat leaves open
+([#61](https://github.com/PortobelloAuth/go-projectusat/issues/61)) precisely
+because the standard cannot specify it. Ranking currently goes on confidence,
+then on coverage, then on a one-step demotion from contradicting reference
+data. Cases like `3253 W 9200 S` — does the street name end at `S` or `SW`? —
+need the adjudicator to consult the data mid-reading rather than after it, and
+that is the next real piece.
 
 ## Handling addresses
 

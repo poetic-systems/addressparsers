@@ -1,0 +1,141 @@
+package parse_test
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser"
+	"github.com/poetic-systems/addressparsers/parse"
+)
+
+// Every address below is either published in the Project US@ specification or
+// invented. None is a real person's address.
+
+// The parser must be usable through go-projectusat's own seam. This is the
+// whole point of the package, so it is asserted at compile time rather than
+// left to a caller to discover.
+var _ parser.ParsingFunc = (*parse.Parser)(nil)
+
+func TestItReadsTheSpecialAddressFormats(t *testing.T) {
+	cases := []struct {
+		name       string
+		source     string
+		streetName string
+		primary    string
+		city       string
+		region     string
+		postal     string
+	}{
+		{
+			name:       "post office box",
+			source:     "PO BOX 11890\nWEST JORDAN UT 84088",
+			streetName: "PO BOX", primary: "11890",
+			city: "WEST JORDAN", region: "UT", postal: "84088",
+		},
+		{
+			name:       "rural route",
+			source:     "RR 4 BOX 125\nWEST JORDAN UT 84088",
+			streetName: "RR 4", primary: "BOX 125",
+			city: "WEST JORDAN", region: "UT", postal: "84088",
+		},
+		{
+			name:       "military",
+			source:     "PSC 3 BOX 4120\nAPO AE 09021",
+			streetName: "PSC 3", primary: "BOX 4120",
+			city: "APO", region: "AE", postal: "09021",
+		},
+	}
+
+	p := parse.New(parse.Options{})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := p.Parse(c.source)
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			if a.StreetName != c.streetName || a.PrimaryNumber != c.primary {
+				t.Errorf("street line = %q %q, want %q %q",
+					a.StreetName, a.PrimaryNumber, c.streetName, c.primary)
+			}
+			if a.City != c.city || a.Region != c.region || a.Postal != c.postal {
+				t.Errorf("last line = %q %q %q, want %q %q %q",
+					a.City, a.Region, a.Postal, c.city, c.region, c.postal)
+			}
+			if a.Type == nil {
+				t.Error("the winning candidate must carry the address type that read it")
+			}
+		})
+	}
+}
+
+// An ordinary street address has no address type to read it yet: go-projectusat
+// #56 decided on `ordinarystreet` and it is not built. This test states that
+// gap rather than hiding it, and is expected to change to a passing parse once
+// the type lands.
+func TestAnOrdinaryStreetAddressHasNoReadingYet(t *testing.T) {
+	p := parse.New(parse.Options{})
+
+	if _, err := p.Parse("123 MAIN ST\nWEST JORDAN UT 84088"); !errors.Is(err, parse.ErrNoReading) {
+		t.Fatalf("want ErrNoReading while ordinarystreet is unbuilt, got %v", err)
+	}
+}
+
+func TestEmptyInputHasNoReading(t *testing.T) {
+	p := parse.New(parse.Options{})
+
+	for _, source := range []string{"", "   ", "\n"} {
+		if _, err := p.Parse(source); !errors.Is(err, parse.ErrNoReading) {
+			t.Errorf("source %q: want ErrNoReading, got %v", source, err)
+		}
+	}
+}
+
+// Reference data demotes a reading; it never discards one. A ZIP and city that
+// the data does not pair still parse, because zipcity's gaps are real and a
+// patient at an address the Census missed must not be dropped.
+func TestReferenceDataDemotesButDoesNotReject(t *testing.T) {
+	source := "PO BOX 11890\nNOT A REAL MUNICIPALITY UT 84088"
+
+	withData := parse.New(parse.Options{UseReferenceData: true})
+	a, err := withData.Parse(source)
+	if err != nil {
+		t.Fatalf("a contradicted reading must still parse: %v", err)
+	}
+	if a.StreetName != "PO BOX" || a.PrimaryNumber != "11890" {
+		t.Errorf("street line = %q %q, want %q %q",
+			a.StreetName, a.PrimaryNumber, "PO BOX", "11890")
+	}
+}
+
+// Turning reference data on must not change a reading the data agrees with.
+func TestReferenceDataLeavesAnAgreedReadingAlone(t *testing.T) {
+	source := "PO BOX 11890\nWEST JORDAN UT 84088"
+
+	plain, err := parse.New(parse.Options{}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+	if !plain.Equals(withData) {
+		t.Errorf("reference data changed an agreed reading:\n without = %+v\n with    = %+v", plain, withData)
+	}
+}
+
+func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
+	p := parse.New(parse.Options{})
+
+	source := "123 INVENTED LANE\nNOT A REAL MUNICIPALITY UT 84088"
+	_, err := p.Parse(source)
+	if err == nil {
+		t.Fatal("want a rejection")
+	}
+	for _, part := range []string{"INVENTED", "NOT A REAL MUNICIPALITY", "84088"} {
+		if strings.Contains(err.Error(), part) {
+			t.Errorf("the error text leaks %q: %v", part, err)
+		}
+	}
+}
