@@ -3,7 +3,7 @@ module github.com/poetic-systems/addressparsers
 go 1.25.0
 
 require (
-	github.com/PortobelloAuth/go-projectusat v0.0.0-20260825204340-47c94dc1e0a8
+	github.com/PortobelloAuth/go-projectusat v0.0.0-20260828015233-24310b206611
 	github.com/poetic-systems/zipcity v0.0.0-20260827213849-469bf99de6af
 )
 
