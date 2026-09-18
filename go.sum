@@ -1,5 +1,5 @@
-github.com/PortobelloAuth/go-projectusat v0.0.0-20260908010727-76881c20b857 h1:aI3Emq8Z4BLfmO63LulEOJfTNnt3mxS1NcZ/PiJ0tsA=
-github.com/PortobelloAuth/go-projectusat v0.0.0-20260908010727-76881c20b857/go.mod h1:Vb/jmOZHZx7X9CaIu3R0ZVDpqvNITfDS/jS1ZbgRhFI=
+github.com/PortobelloAuth/go-projectusat v0.0.0-20260918170319-5e1cc7798f16 h1:7bEwpigLEy3CHLcdM9/sFZILRXSYH9NhNZJSnHYzezU=
+github.com/PortobelloAuth/go-projectusat v0.0.0-20260918170319-5e1cc7798f16/go.mod h1:Vb/jmOZHZx7X9CaIu3R0ZVDpqvNITfDS/jS1ZbgRhFI=
 github.com/anyascii/go v0.3.3 h1:A3BhW92hXPYPb8Y1+zLOip8xjSxNcdl1FaxzTmFxrhs=
 github.com/anyascii/go v0.3.3/go.mod h1:HDvbMmSpqJyIe+xtSkHmAYTjc8PzvO3l1Jmgx/IFUPs=
 github.com/bits-and-blooms/bitset v1.24.2/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
