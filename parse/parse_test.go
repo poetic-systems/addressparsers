@@ -70,15 +70,31 @@ func TestItReadsTheSpecialAddressFormats(t *testing.T) {
 	}
 }
 
-// An ordinary street address has no address type to read it yet: go-projectusat
-// #56 decided on `ordinarystreet` and it is not built. This test states that
-// gap rather than hiding it, and is expected to change to a passing parse once
-// the type lands.
-func TestAnOrdinaryStreetAddressHasNoReadingYet(t *testing.T) {
-	p := parse.New(parse.Options{})
+// The ordinary street line is assembled from the shared vocabularies rather
+// than recognized, so what matters is that every element comes out in its
+// place: the formatted line is the whole decomposition in one string.
+func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
+	cases := []struct {
+		source string
+		street string
+	}{
+		{"123 MAIN ST\nWEST JORDAN UT 84088", "123 MAIN ST"},
+		{"123 N MAIN ST APT 4\nWEST JORDAN UT 84088", "123 N MAIN ST APT 4"},
+		{"1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500", "1600 PENNSYLVANIA AVE NW"},
+		{"GENERAL DELIVERY\nFAIRHAVEN MA 02719", "GENERAL DELIVERY"},
+	}
 
-	if _, err := p.Parse("123 MAIN ST\nWEST JORDAN UT 84088"); !errors.Is(err, parse.ErrNoReading) {
-		t.Fatalf("want ErrNoReading while ordinarystreet is unbuilt, got %v", err)
+	p := parse.New(parse.Options{})
+	for _, c := range cases {
+		t.Run(c.street, func(t *testing.T) {
+			a, err := p.Parse(c.source)
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			if got := a.FormatStreetLine(); got != c.street {
+				t.Errorf("street line = %q, want %q", got, c.street)
+			}
+		})
 	}
 }
 
@@ -129,12 +145,13 @@ func TestAgreementDoesNotChangeTheChosenReading(t *testing.T) {
 func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
 	p := parse.New(parse.Options{})
 
-	source := "123 INVENTED LANE\nNOT A REAL MUNICIPALITY UT 84088"
+	// No last line, so no address type can read it.
+	source := "123 INVENTED LANE\nNOT A REAL MUNICIPALITY"
 	_, err := p.Parse(source)
 	if err == nil {
 		t.Fatal("want a rejection")
 	}
-	for _, part := range []string{"INVENTED", "NOT A REAL MUNICIPALITY", "84088"} {
+	for _, part := range []string{"INVENTED", "NOT A REAL MUNICIPALITY"} {
 		if strings.Contains(err.Error(), part) {
 			t.Errorf("the error text leaks %q: %v", part, err)
 		}
