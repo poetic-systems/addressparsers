@@ -20,7 +20,9 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/address"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/token"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/generaldelivery"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/military"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ruralroute"
 	"github.com/PortobelloAuth/go-projectusat/pkg/country"
@@ -49,21 +51,28 @@ var vocabularies = []func([]token.Token) []claim.Claim{
 	pobox.Claims,
 	military.Claims,
 	ruralroute.Claims,
+	generaldelivery.Claims,
 }
 
 // addressTypes are the Candidates functions, each offering that type's reading
 // of the whole address or offering none.
 //
-// puertorico is absent because it has no Candidates function yet, and there is
-// no ordinary street type at all. Both are tracked upstream — go-projectusat
-// #60 and #56 — and until they land this parser reads special formats and
-// returns ErrNoReading for an ordinary street address. That is a gap in
-// coverage, not a defect here: a missing address type produces no candidate,
-// which is exactly how a type declines to read an address it does not fit.
+// ordinarystreet is the catchall and offers every reading it can assemble, so
+// most of what choose ranks comes from it. It never rates a reading Exact and
+// the closed forms rate their own lines Exact, which is what keeps a post
+// office box a post office box and not a street named PO BOX: catchall means
+// lowest precedence where a closed form also reads the tokens.
+//
+// puertorico is absent because it has no Candidates function yet
+// (go-projectusat #60). That is a gap in coverage, not a defect here: a missing
+// address type produces no candidate, which is exactly how a type declines to
+// read an address it does not fit.
 var addressTypes = []func([]token.Token, []claim.Claim, lastline.LineClaim) []*address.CandidateAddress{
 	pobox.Candidates,
 	military.Candidates,
 	ruralroute.Candidates,
+	generaldelivery.Candidates,
+	ordinarystreet.Candidates,
 }
 
 // ErrNoReading reports that no address type offered a reading of the source.

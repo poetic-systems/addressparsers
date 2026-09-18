@@ -73,14 +73,11 @@ confirmation. Both are worth acting on. Neither is proof: agreement stops below
 `ConfidenceExact`, because a reading that is certain is a claim about the
 grammar that reference data is in no position to make.
 
-**Coverage today:** PO box, rural route, and military addresses parse. An
-ordinary street address returns `ErrNoReading`, because the address type that
-would read it is decided but unbuilt
-([go-projectusat#56](https://github.com/PortobelloAuth/go-projectusat/issues/56)),
-and Puerto Rico addresses are waiting on
-[#60](https://github.com/PortobelloAuth/go-projectusat/issues/60). A missing
-address type produces no candidate, which is exactly how a type declines to
-read an address it does not fit.
+**Coverage today:** ordinary street, PO box, rural route, general delivery,
+and military addresses parse. Puerto Rico addresses are waiting on
+[go-projectusat#60](https://github.com/PortobelloAuth/go-projectusat/issues/60).
+A missing address type produces no candidate, which is exactly how a type
+declines to read an address it does not fit.
 
 ### `zipcityverify`
 
