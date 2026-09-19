@@ -204,11 +204,10 @@ func TestTheStepsAreBounded(t *testing.T) {
 	}
 }
 
-// A candidate with a five digit ZIP asks CheckZipAndStreet, never
-// CheckCityStateAndStreet — see go-projectusat#71's 2026-09-18T15:06Z comment,
-// "step 2" this change implements. W 9200 S is real in zipcity's West Jordan
-// data (verified by probe), so a true here can only have come from the ZIP
-// path.
+// A candidate with a ZIP, a city, and a two-letter region asks both
+// CheckZipAndStreet and CheckCityStateAndStreet and folds the two answers —
+// see foldStreetAnswers. W 9200 S is real in zipcity's West Jordan data on
+// both shards (verified by probe), so the fold lands on Agrees.
 func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
 	a := &address.Address{
 		Type:            &ordinarystreet.OrdinaryStreetAddress{},
@@ -357,5 +356,88 @@ func TestAgreementCannotLiftAnAbsorbedReadingPastTheSplitOne(t *testing.T) {
 			t.Errorf("with %+v: name=%q suffix=%q post=%q, want PENNSYLVANIA AVE NW split into its fields",
 				opts, a.StreetName, a.StreetSuffix, a.Postdirectional)
 		}
+	}
+}
+
+// foldStreetAnswers is the whole fold: both true is agrees, both false is
+// contradicts, and the two split combinations each name the side that was
+// absent.
+func TestFoldStreetAnswers(t *testing.T) {
+	cases := []struct {
+		zipPresent, cityPresent bool
+		want                    parse.Agreement
+	}{
+		{true, true, parse.Agrees},
+		{false, false, parse.Contradicts},
+		{false, true, parse.MissingInZip},
+		{true, false, parse.MissingInCity},
+	}
+	for _, tc := range cases {
+		if got := parse.FoldStreetAnswers(tc.zipPresent, tc.cityPresent); got != tc.want {
+			t.Errorf("FoldStreetAnswers(%v, %v) = %v, want %v",
+				tc.zipPresent, tc.cityPresent, got, tc.want)
+		}
+	}
+}
+
+// A reading with a ZIP, a city, and a two-letter region asks both street
+// questions rather than just one. 1600 Pennsylvania Ave NW is real in
+// zipcity's Washington, DC data on both the ZIP shard and the city-state
+// shard (verified by probe), so both questions come back true and the fold
+// lands on Agrees.
+func TestStreetAgreementAsksBothQuestionsWhenItCan(t *testing.T) {
+	a := &address.Address{
+		Type:            &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName:      "PENNSYLVANIA",
+		StreetSuffix:    "AVE",
+		Postdirectional: "NW",
+		City:            "WASHINGTON",
+		Region:          "DC",
+		Postal:          "20500",
+	}
+
+	ans, ok := parse.StreetAgreement(a)
+	if !ok {
+		t.Fatal("want a question asked")
+	}
+	if ans != parse.Agrees {
+		t.Errorf("StreetAgreement = %v, want Agrees", ans)
+	}
+}
+
+// A split street answer takes no step, in either direction: the fold's
+// missingInZip and missingInCity cases must leave a reading exactly where it
+// would sit with reference data off.
+//
+// Wisconsin Ave NW is real in zipcity's Washington, DC city-state data, but
+// not for ZIP 20500 (verified by probe): Wisconsin Avenue runs through upper
+// northwest DC, nowhere near the White House ZIP. That is a genuine split —
+// the street is real, the pairing with this particular ZIP is not — rather
+// than a manufactured one.
+func TestASplitStreetAnswerTakesNoStep(t *testing.T) {
+	a := &address.Address{
+		Type:            &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName:      "WISCONSIN",
+		StreetSuffix:    "AVE",
+		Postdirectional: "NW",
+		City:            "WASHINGTON",
+		Region:          "DC",
+		Postal:          "20500",
+	}
+	if ans, ok := parse.StreetAgreement(a); !ok || ans != parse.MissingInZip {
+		t.Fatalf("StreetAgreement = %v, %v, want MissingInZip, true", ans, ok)
+	}
+
+	source := "1600 WISCONSIN AVE NW\nWASHINGTON DC 20500"
+	plain, err := parse.New(parse.Options{}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+	if !plain.Equals(withData) {
+		t.Errorf("a split street answer moved a reading:\n without = %+v\n with    = %+v", plain, withData)
 	}
 }

@@ -21,13 +21,16 @@ var (
 type Agreement = agreement
 
 const (
-	Unknown     = unknown
-	Agrees      = agrees
-	Contradicts = contradicts
+	Unknown       = unknown
+	Agrees        = agrees
+	Contradicts   = contradicts
+	MissingInZip  = missingInZip
+	MissingInCity = missingInCity
 )
 
 var (
-	ZipCityAgreement = zipCityAgreement
-	StreetAgreement  = streetAgreement
-	StreetForQuery   = streetForQuery
+	ZipCityAgreement  = zipCityAgreement
+	StreetAgreement   = streetAgreement
+	StreetForQuery    = streetForQuery
+	FoldStreetAnswers = foldStreetAnswers
 )
