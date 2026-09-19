@@ -147,6 +147,14 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 // Confidence decides, and coverage breaks ties: between two equally confident
 // readings the one stranding fewer tokens is the better account of the input.
 // Reference data moves a reading one step in either direction — see agreement.
+//
+// The grammar's own rating breaks what is left. Two readings of one street
+// line can differ only in which field holds a word — PENNSYLVANIA AVE as a
+// name against PENNSYLVANIA with AVE as its suffix — and the data cannot see
+// that: both ask it the same question and get the same answer. Where that
+// answer lands them on the same step, the rating the grammar gave before the
+// data spoke is the one signal that still tells them apart, and it already
+// prefers the reading that explains the suffix.
 func (p *Parser) choose(candidates []*address.CandidateAddress) *address.CandidateAddress {
 	type ranked struct {
 		candidate *address.CandidateAddress
@@ -179,7 +187,10 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 		if scored[i].score != scored[j].score {
 			return scored[i].score > scored[j].score
 		}
-		return len(scored[i].candidate.Leftover) < len(scored[j].candidate.Leftover)
+		if len(scored[i].candidate.Leftover) != len(scored[j].candidate.Leftover) {
+			return len(scored[i].candidate.Leftover) < len(scored[j].candidate.Leftover)
+		}
+		return scored[i].candidate.Confidence > scored[j].candidate.Confidence
 	})
 	return scored[0].candidate
 }
