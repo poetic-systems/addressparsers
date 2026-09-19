@@ -213,13 +213,14 @@ const (
 // question the reading qualifies for.
 //
 // Every answer is evidence, and none of them are symmetric. zipcity answers
-// from bloom filters built at a 0.01 false positive rate, so a false is
-// definitive — the key was never added — while a true is a likelihood ratio of
-// about 100:1 in favour of the pairing rather than a confirmation of it. Both
-// move a candidate by one step and neither settles it: querying several
-// mutually exclusive readings that are all genuinely absent yields a spurious
-// true about 1-0.99^k of the time, so a true must not be allowed to resolve a
-// reading on its own, and must never be reported to a caller as verification.
+// from bloom filters built at a 0.005 false positive rate (the rate is set in
+// zipcity's `internal/bloomgenerator`), so a false is definitive — the key was
+// never added — while a true is a likelihood ratio of about 200:1 in favour of
+// the pairing rather than a confirmation of it. Both move a candidate by one
+// step and neither settles it: querying several mutually exclusive readings
+// that are all genuinely absent yields a spurious true about 1-0.995^k of the
+// time, so a true must not be allowed to resolve a reading on its own, and
+// must never be reported to a caller as verification.
 // That is also why at most one street question is ever asked here — see
 // streetAgreement — rather than one per spelling a candidate might carry.
 //

@@ -67,12 +67,12 @@ of the standard, and its answers depend only on its input — which is what make
 its behaviour reproducible from the specification alone.
 
 **Reference data moves a candidate one step per question asked, in either
-direction, and never settles it.** `zipcity`'s filters are built at a 0.01
-false positive rate, so a `false` is definitive while a `true` is roughly
-100:1 evidence rather than a confirmation. Both are worth acting on. Neither is
-proof: agreement stops below `ConfidenceExact`, because a reading that is
-certain is a claim about the grammar that reference data is in no position to
-make.
+direction, and never settles it.** `zipcity`'s filters are built at a 0.005
+false positive rate (set in zipcity's `internal/bloomgenerator`), so a `false`
+is definitive while a `true` is roughly 200:1 evidence rather than a
+confirmation. Both are worth acting on. Neither is proof: agreement stops below
+`ConfidenceExact`, because a reading that is certain is a claim about the
+grammar that reference data is in no position to make.
 
 A candidate that carries a street name asks one further, independent
 question about it — `CheckZipAndStreet` where the candidate has a ZIP,
