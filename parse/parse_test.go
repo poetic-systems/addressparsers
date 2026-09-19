@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PortobelloAuth/go-projectusat/pkg/address"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
 	"github.com/poetic-systems/addressparsers/parse"
 )
 
@@ -198,5 +201,141 @@ func TestTheStepsAreBounded(t *testing.T) {
 	}
 	if down != claim.ConfidenceWeak {
 		t.Errorf("repeated contradiction reached %d, want %d", down, claim.ConfidenceWeak)
+	}
+}
+
+// A candidate with a five digit ZIP asks CheckZipAndStreet, never
+// CheckCityStateAndStreet — see go-projectusat#71's 2026-09-18T15:06Z comment,
+// "step 2" this change implements. W 9200 S is real in zipcity's West Jordan
+// data (verified by probe), so a true here can only have come from the ZIP
+// path.
+func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
+	a := &address.Address{
+		Type:            &ordinarystreet.OrdinaryStreetAddress{},
+		Predirectional:  "W",
+		StreetName:      "9200",
+		Postdirectional: "S",
+		City:            "WEST JORDAN",
+		Region:          "UT",
+		Postal:          "84088",
+	}
+
+	ans, ok := parse.StreetAgreement(a)
+	if !ok {
+		t.Fatal("want a question asked")
+	}
+	if ans != parse.Agrees {
+		t.Errorf("StreetAgreement = %v, want Agrees", ans)
+	}
+}
+
+// A candidate with no ZIP falls back to CheckCityStateAndStreet rather than
+// asking nothing — the choice CONTRIBUTING calls out as worth deciding
+// explicitly. Pleasant Hill Rd is real in zipcity's Pleasant Hill, CA
+// city-street data (verified by probe); a made up street at the same city and
+// state is absent, and the two together show the city-state path is what
+// answered, not a decline that happened to look like one.
+func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
+	real := &address.Address{
+		Type:         &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName:   "PLEASANT HILL",
+		StreetSuffix: "RD",
+		City:         "PLEASANT HILL",
+		Region:       "CA",
+	}
+	if ans, ok := parse.StreetAgreement(real); !ok || ans != parse.Agrees {
+		t.Errorf("StreetAgreement(real street) = %v, %v, want Agrees, true", ans, ok)
+	}
+
+	absent := &address.Address{
+		Type:         &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName:   "ZQXVBORK",
+		StreetSuffix: "LN",
+		City:         "PLEASANT HILL",
+		Region:       "CA",
+	}
+	if ans, ok := parse.StreetAgreement(absent); !ok || ans != parse.Contradicts {
+		t.Errorf("StreetAgreement(absent street) = %v, %v, want Contradicts, true", ans, ok)
+	}
+}
+
+// The closed forms carry a fixed pseudo street name — "PO BOX" is not a
+// street zipcity was ever asked about — so StreetAgreement must decline
+// rather than manufacture a contradiction on every one of them.
+func TestStreetAgreementDeclinesForClosedForms(t *testing.T) {
+	a := &address.Address{
+		Type:          &pobox.POBoxAddress{},
+		StreetName:    "PO BOX",
+		PrimaryNumber: "11890",
+		City:          "WEST JORDAN",
+		Region:        "UT",
+		Postal:        "84088",
+	}
+
+	if _, ok := parse.StreetAgreement(a); ok {
+		t.Error("want the question declined for a closed form")
+	}
+}
+
+// A reading with no street name at all — an ordinarystreet candidate the
+// vocabularies left empty — has nothing to ask zipcity about.
+func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
+	a := &address.Address{
+		Type:   &ordinarystreet.OrdinaryStreetAddress{},
+		City:   "WEST JORDAN",
+		Region: "UT",
+		Postal: "84088",
+	}
+
+	if _, ok := parse.StreetAgreement(a); ok {
+		t.Error("want the question declined with no street name")
+	}
+}
+
+// A street the data contradicts steps the reading down but the address still
+// parses — the same guarantee TestReferenceDataDemotesButDoesNotReject makes
+// for zip+city, now exercised for the street question. ZQXVBORK is invented
+// and West Jordan, UT 84088 is real, so only the street half of agreement can
+// be contradicting here.
+//
+// The street carries no suffix on purpose. ordinarystreet always offers a
+// second reading beside "name ZQXVBORK" that absorbs a would-be suffix into
+// the name instead — see candidate.go's streetConfidence — and that second
+// reading renders to the identical zipcity query string as the first, so a
+// zip+city agreement (West Jordan pairs with 84088) can promote it to tie
+// the properly split reading before the street contradiction demotes both by
+// the same step. A bare name has no suffix to absorb, so there is only one
+// reading and no tie for the demotion to land ambiguously on.
+func TestStreetContradictionDemotesButStillParses(t *testing.T) {
+	source := "123 ZQXVBORK\nWEST JORDAN UT 84088"
+
+	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("a street-contradicted reading must still parse: %v", err)
+	}
+	if withData.StreetName != "ZQXVBORK" || withData.PrimaryNumber != "123" {
+		t.Errorf("street = %q %q, want %q %q", withData.PrimaryNumber, withData.StreetName, "123", "ZQXVBORK")
+	}
+}
+
+// Turning on the street question must not change a reading with only one
+// candidate to choose among. BROADWAY has no suffix and no directional, so
+// ordinarystreet offers exactly one reading of it — nothing for reference
+// data to promote past another candidate — and it is real at this ZIP and
+// city both, so this exercises two agreements (zip+city and zip+street) on
+// the one reading without either one having a competing reading to distort.
+func TestStreetAgreementDoesNotChangeAnUnambiguousReading(t *testing.T) {
+	source := "BROADWAY\nNEW YORK NY 10012"
+
+	plain, err := parse.New(parse.Options{}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+	if !plain.Equals(withData) {
+		t.Errorf("reference data changed an agreed reading:\n without = %+v\n with    = %+v", plain, withData)
 	}
 }
