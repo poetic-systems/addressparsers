@@ -174,6 +174,10 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 					score = weaken(score)
 				case agrees:
 					score = strengthen(score)
+				case missingInZip, missingInCity:
+					// A split street answer is annotated, not stepped — see
+					// streetAgreement's doc comment for why it must not read
+					// as either an agreement or a contradiction.
 				}
 			}
 		}
@@ -206,11 +210,23 @@ const (
 	agrees
 	// contradicts means the data definitively does not hold it.
 	contradicts
+	// missingInZip means a street question split: the city-state filter
+	// found the street, the ZIP filter did not. The street is real in the
+	// city but not recorded for this ZIP — the ZIP is the suspect.
+	missingInZip
+	// missingInCity means a street question split the other way: the ZIP
+	// filter found the street, the city-state filter did not. The street is
+	// real for this ZIP but not recorded for this city name — the city is
+	// the suspect. zipcity's city-street keys come from TIGER place names,
+	// and a postal or GeoNames city name need not be one, so this direction
+	// is probably not rare — which is exactly why it must not be folded
+	// into agrees or contradicts.
+	missingInCity
 )
 
 // agreement asks zipcity every question this reading supports and reports
-// each answer, in the order asked: zip+city first, then the one street
-// question the reading qualifies for.
+// each answer, in the order asked: zip+city first, then the street question,
+// folded from up to two zipcity calls into one answer — see streetAgreement.
 //
 // Every answer is evidence, and none of them are symmetric. zipcity answers
 // from bloom filters built at a 0.005 false positive rate (the rate is set in
@@ -221,8 +237,6 @@ const (
 // that are all genuinely absent yields a spurious true about 1-0.995^k of the
 // time, so a true must not be allowed to resolve a reading on its own, and
 // must never be reported to a caller as verification.
-// That is also why at most one street question is ever asked here — see
-// streetAgreement — rather than one per spelling a candidate might carry.
 //
 // A contradiction is likewise not proof the address is wrong. zipcity is built
 // from Census TIGER files with documented gaps, so a real address the Census
@@ -258,8 +272,9 @@ func zipCityAgreement(a *address.Address) (agreement, bool) {
 	return answerFor(present), true
 }
 
-// streetAgreement asks the one street question a reading qualifies for: by
-// ZIP where the reading has one, by city and state where it does not.
+// streetAgreement asks zipcity about a reading's street, folding the answer
+// — or the two answers, when the reading qualifies for both — into one
+// agreement.
 //
 // Only ordinarystreet offers a reading whose StreetName names a place.
 // pobox, ruralroute, military and generaldelivery each carry a fixed
@@ -267,13 +282,24 @@ func zipCityAgreement(a *address.Address) (agreement, bool) {
 // "RR 4", "PSC 3" — and zipcity was never built to answer whether those
 // strings are streets. Asking it would manufacture a contradiction on every
 // closed-form reading rather than evidence about one, so those types are
-// left at zip+city alone, exactly as they were before this question existed.
+// left at zip+city alone.
 //
-// CheckCityStateAndStreet is asked only when there is no ZIP to ask
-// CheckZipAndStreet with; a candidate with both would otherwise answer the
-// same question about the same street twice; two answers about one fact
-// is exactly the enumeration agreement's doc comment warns against, just
-// spelled as two call sites instead of two spellings.
+// CheckZipAndStreet and CheckCityStateAndStreet are different filters over
+// different keys — one shard scoped by ZIP, the other by city and state —
+// so their false positives are independent: about 0.005^2 for both to be
+// spurious, against 0.005 for either alone. On the truth side the two are
+// almost perfectly correlated, since a street TIGER recorded for a ZIP is
+// almost always recorded for that ZIP's city too, so a second true adds
+// little evidence on its own. What it buys is corroboration: asking both and
+// folding the answers before either moves confidence squares the exposure to
+// a spurious step instead of doubling it, which is what two separate agrees
+// calls would cost. That is why this reading asks both questions whenever it
+// has a ZIP, a city, and a two-letter region, and asks whichever one it can
+// when it has only one of those — see foldStreetAnswers for the fold.
+//
+// (MatchZipAndStreet's directional-variant sweep is a different kind of
+// asking twice — several spellings of one street rather than two shards of
+// one spelling — and is still deliberately unused here; see streetForQuery.)
 func streetAgreement(a *address.Address) (agreement, bool) {
 	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
 		return unknown, false
@@ -283,22 +309,50 @@ func streetAgreement(a *address.Address) (agreement, bool) {
 	}
 	street := streetForQuery(a)
 
-	if m := zip5.FindStringSubmatch(a.Postal); m != nil {
+	m := zip5.FindStringSubmatch(a.Postal)
+	hasZip := m != nil
+	hasCity := a.City != "" && len(a.Region) == 2
+	if !hasZip && !hasCity {
+		return unknown, false
+	}
+
+	var inZip, inCity bool
+	if hasZip {
 		present, err := zipcity.CheckZipAndStreet(m[1], street)
 		if err != nil {
 			return unknown, false
 		}
-		return answerFor(present), true
+		inZip = present
+	}
+	if hasCity {
+		present, err := zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
+		if err != nil {
+			return unknown, false
+		}
+		inCity = present
 	}
 
-	if a.City == "" || len(a.Region) != 2 {
-		return unknown, false
+	if hasZip && hasCity {
+		return foldStreetAnswers(inZip, inCity), true
 	}
-	present, err := zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
-	if err != nil {
-		return unknown, false
+	return answerFor(inZip || inCity), true
+}
+
+// foldStreetAnswers combines CheckZipAndStreet's and CheckCityStateAndStreet's
+// answers into one street agreement: both true is agrees, both false is
+// contradicts, and a split is neither — see streetAgreement and missingInZip
+// / missingInCity for why the split case is recorded rather than resolved.
+func foldStreetAnswers(zipPresent, cityPresent bool) agreement {
+	switch {
+	case zipPresent && cityPresent:
+		return agrees
+	case !zipPresent && !cityPresent:
+		return contradicts
+	case cityPresent:
+		return missingInZip
+	default:
+		return missingInCity
 	}
-	return answerFor(present), true
 }
 
 // streetForQuery renders a reading's street the way zipcity's filters are
