@@ -12,14 +12,15 @@
 // present, and some fraction of trues are collisions for keys that were never
 // added at all.
 //
-// A true is still evidence — at the 0.01 rate zipcity builds its filters to, it
-// is a likelihood ratio of about 100:1 in favour of the pairing. What it is not
-// is proof, and a verifier is the wrong place to spend it: an AddressVerifier
-// returns an address or an error, so the only thing it could do with a true is
-// assert that the address is real. So this package only ever rejects. There is
-// no Confirm and no "verified" flag, because reading a true as confirmation is
-// the mistake this package is shaped to prevent. A caller that wants to weigh a
-// true rather than trust it should rank candidates with it, as parse does.
+// A true is still evidence — at the 0.005 rate zipcity builds its filters to
+// (set in zipcity's `internal/bloomgenerator`), it is a likelihood ratio of
+// about 200:1 in favour of the pairing. What it is not is proof, and a verifier
+// is the wrong place to spend it: an AddressVerifier returns an address or an
+// error, so the only thing it could do with a true is assert that the address
+// is real. So this package only ever rejects. There is no Confirm and no
+// "verified" flag, because reading a true as confirmation is the mistake this
+// package is shaped to prevent. A caller that wants to weigh a true rather than
+// trust it should rank candidates with it, as parse does.
 //
 // # Absent is not the same as invalid
 //
