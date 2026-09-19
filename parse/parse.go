@@ -30,6 +30,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/highways"
 	"github.com/PortobelloAuth/go-projectusat/pkg/lastline"
 	"github.com/PortobelloAuth/go-projectusat/pkg/postalcode"
+	"github.com/PortobelloAuth/go-projectusat/pkg/privatemailbox"
 	"github.com/PortobelloAuth/go-projectusat/pkg/region"
 	"github.com/PortobelloAuth/go-projectusat/pkg/secondaryunit"
 	"github.com/PortobelloAuth/go-projectusat/pkg/streetsuffixes"
@@ -48,6 +49,7 @@ var vocabularies = []func([]token.Token) []claim.Claim{
 	directionals.Claims,
 	streetsuffixes.Claims,
 	secondaryunit.Claims,
+	privatemailbox.Claims,
 	highways.Claims,
 	pobox.Claims,
 	military.Claims,

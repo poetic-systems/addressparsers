@@ -85,6 +85,11 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 		{"123 N MAIN ST APT 4\nWEST JORDAN UT 84088", "123 N MAIN ST APT 4"},
 		{"1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500", "1600 PENNSYLVANIA AVE NW"},
 		{"GENERAL DELIVERY\nFAIRHAVEN MA 02719", "GENERAL DELIVERY"},
+		// A private mailbox only comes out if privatemailbox is among the
+		// vocabularies consulted; without its Detail claim the line reads
+		// as a street named MAIN STREET PMB 4545.
+		{"123 MAIN STREET PMB 4545\nHERNDON VA 22071", "123 MAIN ST PMB 4545"},
+		{"PMB 234\n123 MAIN ST\nHERNDON VA 22071", "123 MAIN ST PMB 234"},
 	}
 
 	p := parse.New(parse.Options{})
