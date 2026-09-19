@@ -339,3 +339,23 @@ func TestStreetAgreementDoesNotChangeAnUnambiguousReading(t *testing.T) {
 		t.Errorf("reference data changed an agreed reading:\n without = %+v\n with    = %+v", plain, withData)
 	}
 }
+
+// Two readings of one street line that differ only in which field holds a
+// word ask the data the same question, so agreement lifts both. Where the
+// split reading is already at the ceiling and the absorbed one is a step
+// below, they land together, and the grammar's own rating must be what
+// separates them — otherwise the winner is candidate order.
+func TestAgreementCannotLiftAnAbsorbedReadingPastTheSplitOne(t *testing.T) {
+	source := "1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500"
+
+	for _, opts := range []parse.Options{{}, {UseReferenceData: true}} {
+		a, err := parse.New(opts).Parse(source)
+		if err != nil {
+			t.Fatalf("parsing with %+v: %v", opts, err)
+		}
+		if a.StreetName != "PENNSYLVANIA" || a.StreetSuffix != "AVE" || a.Postdirectional != "NW" {
+			t.Errorf("with %+v: name=%q suffix=%q post=%q, want PENNSYLVANIA AVE NW split into its fields",
+				opts, a.StreetName, a.StreetSuffix, a.Postdirectional)
+		}
+	}
+}
