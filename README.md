@@ -66,12 +66,23 @@ p := parser.New(parser.AddressParsingOptions{
 of the standard, and its answers depend only on its input — which is what makes
 its behaviour reproducible from the specification alone.
 
-**Reference data moves a candidate one step, in either direction, and never
-settles it.** `zipcity`'s filters are built at a 0.01 false positive rate, so a
-`false` is definitive while a `true` is roughly 100:1 evidence rather than a
-confirmation. Both are worth acting on. Neither is proof: agreement stops below
-`ConfidenceExact`, because a reading that is certain is a claim about the
-grammar that reference data is in no position to make.
+**Reference data moves a candidate one step per question asked, in either
+direction, and never settles it.** `zipcity`'s filters are built at a 0.01
+false positive rate, so a `false` is definitive while a `true` is roughly
+100:1 evidence rather than a confirmation. Both are worth acting on. Neither is
+proof: agreement stops below `ConfidenceExact`, because a reading that is
+certain is a claim about the grammar that reference data is in no position to
+make.
+
+A candidate that carries a street name asks one further, independent
+question about it — `CheckZipAndStreet` where the candidate has a ZIP,
+`CheckCityStateAndStreet` where it has a city and state but no ZIP — and its
+answer moves confidence by its own step, the same way the ZIP-and-city
+question's does. Only one street question is ever asked per candidate:
+`zipcity` also offers directional-variant matching for a street
+(`MatchZipAndStreet`), and querying several spellings of the same street
+multiplies the odds of a spurious `true` for no better reason than asking
+more than once. See `agreement` and `streetAgreement` in `parse/parse.go`.
 
 **Coverage today:** ordinary street, PO box, rural route, general delivery,
 and military addresses parse. Puerto Rico addresses are waiting on

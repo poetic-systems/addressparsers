@@ -33,6 +33,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/region"
 	"github.com/PortobelloAuth/go-projectusat/pkg/secondaryunit"
 	"github.com/PortobelloAuth/go-projectusat/pkg/streetsuffixes"
+	"github.com/PortobelloAuth/go-projectusat/pkg/textutil"
 	"github.com/poetic-systems/zipcity"
 )
 
@@ -159,11 +160,13 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 		}
 		score := c.Confidence
 		if p.opts.UseReferenceData {
-			switch p.agreement(c.Address) {
-			case contradicts:
-				score = weaken(score)
-			case agrees:
-				score = strengthen(score)
+			for _, ans := range p.agreement(c.Address) {
+				switch ans {
+				case contradicts:
+					score = weaken(score)
+				case agrees:
+					score = strengthen(score)
+				}
 			}
 		}
 		scored = append(scored, ranked{candidate: c, score: score})
@@ -194,35 +197,113 @@ const (
 	contradicts
 )
 
-// agreement asks zipcity about a reading and reports which way the answer cuts.
+// agreement asks zipcity every question this reading supports and reports
+// each answer, in the order asked: zip+city first, then the one street
+// question the reading qualifies for.
 //
-// Both answers are evidence, and they are not symmetric. zipcity answers from
-// bloom filters built at a 0.01 false positive rate, so a false is definitive —
-// the key was never added — while a true is a likelihood ratio of about 100:1
-// in favour of the pairing rather than a confirmation of it. Both move a
-// candidate by one step and neither settles it: querying several mutually
-// exclusive readings that are all genuinely absent yields a spurious true about
-// 1-0.99^k of the time, so a true must not be allowed to resolve a reading on
-// its own, and must never be reported to a caller as verification.
+// Every answer is evidence, and none of them are symmetric. zipcity answers
+// from bloom filters built at a 0.01 false positive rate, so a false is
+// definitive — the key was never added — while a true is a likelihood ratio of
+// about 100:1 in favour of the pairing rather than a confirmation of it. Both
+// move a candidate by one step and neither settles it: querying several
+// mutually exclusive readings that are all genuinely absent yields a spurious
+// true about 1-0.99^k of the time, so a true must not be allowed to resolve a
+// reading on its own, and must never be reported to a caller as verification.
+// That is also why at most one street question is ever asked here — see
+// streetAgreement — rather than one per spelling a candidate might carry.
 //
 // A contradiction is likewise not proof the address is wrong. zipcity is built
 // from Census TIGER files with documented gaps, so a real address the Census
-// missed lands here too. That is why the answer is one step of confidence
+// missed lands here too. That is why every answer is one step of confidence
 // rather than rejection, and why UseReferenceData is off by default.
-func (p *Parser) agreement(a *address.Address) agreement {
+func (p *Parser) agreement(a *address.Address) []agreement {
+	var answers []agreement
+
+	if ans, ok := zipCityAgreement(a); ok {
+		answers = append(answers, ans)
+	}
+	if ans, ok := streetAgreement(a); ok {
+		answers = append(answers, ans)
+	}
+
+	return answers
+}
+
+// zipCityAgreement asks whether the ZIP and city pair. It declines, rather
+// than answering, when there is nothing to ask about or zipcity could not be
+// consulted: an address the data cannot speak to is not thereby a better or a
+// worse reading.
+func zipCityAgreement(a *address.Address) (agreement, bool) {
 	m := zip5.FindStringSubmatch(a.Postal)
 	if m == nil || a.City == "" {
-		// Nothing to ask about. An address the data cannot be consulted for is
-		// not thereby a better or a worse reading.
-		return unknown
+		return unknown, false
 	}
 
 	present, err := zipcity.CheckZipAndCity(m[1], a.City)
 	if err != nil {
-		// zipcity declined the inputs rather than answering about them. That is
-		// a question this parser could not ask, not an answer it received.
-		return unknown
+		return unknown, false
 	}
+	return answerFor(present), true
+}
+
+// streetAgreement asks the one street question a reading qualifies for: by
+// ZIP where the reading has one, by city and state where it does not.
+//
+// Only ordinarystreet offers a reading whose StreetName names a place.
+// pobox, ruralroute, military and generaldelivery each carry a fixed
+// pseudo-name that describes their format rather than a street — "PO BOX",
+// "RR 4", "PSC 3" — and zipcity was never built to answer whether those
+// strings are streets. Asking it would manufacture a contradiction on every
+// closed-form reading rather than evidence about one, so those types are
+// left at zip+city alone, exactly as they were before this question existed.
+//
+// CheckCityStateAndStreet is asked only when there is no ZIP to ask
+// CheckZipAndStreet with; a candidate with both would otherwise answer the
+// same question about the same street twice; two answers about one fact
+// is exactly the enumeration agreement's doc comment warns against, just
+// spelled as two call sites instead of two spellings.
+func streetAgreement(a *address.Address) (agreement, bool) {
+	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
+		return unknown, false
+	}
+	if a.StreetName == "" {
+		return unknown, false
+	}
+	street := streetForQuery(a)
+
+	if m := zip5.FindStringSubmatch(a.Postal); m != nil {
+		present, err := zipcity.CheckZipAndStreet(m[1], street)
+		if err != nil {
+			return unknown, false
+		}
+		return answerFor(present), true
+	}
+
+	if a.City == "" || len(a.Region) != 2 {
+		return unknown, false
+	}
+	present, err := zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
+	if err != nil {
+		return unknown, false
+	}
+	return answerFor(present), true
+}
+
+// streetForQuery renders a reading's street the way zipcity's filters are
+// keyed: predirectional, name, suffix, postdirectional, in Pub 28's order —
+// the same order address.Address.FormatStreetLine uses for these four fields,
+// minus the primary number and the secondary unit, which are not part of a
+// street. No directional variant is tried; MatchZipAndStreet exists for that
+// and is deliberately not used here, because trying several spellings of one
+// street multiplies the chance of a spurious true (see the 13:08Z comment on
+// go-projectusat#71) for the sake of a question agreement already answered
+// honestly once.
+func streetForQuery(a *address.Address) string {
+	return textutil.JoinNonEmpty(" ", a.Predirectional, a.StreetName, a.StreetSuffix, a.Postdirectional)
+}
+
+// answerFor turns a bloom filter's boolean into the agreement it represents.
+func answerFor(present bool) agreement {
 	if present {
 		return agrees
 	}
