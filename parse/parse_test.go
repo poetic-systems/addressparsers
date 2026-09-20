@@ -166,14 +166,12 @@ func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
 	}
 }
 
-// Aaron's case, and the reason the capped scale had to go: a reading rated
-// Exact that the data contradicts must not beat a reading rated Strong that
-// the data agrees with. The old scale stepped Confidence itself and stopped
-// short of Exact, so the two tied at Strong and the grammar-rating tie-break
-// — which still preferred the contradicted reading — decided it, meaning the
-// contradiction never actually moved the outcome. The uncapped score has no
-// tie to break: Exact contradicted is 3-1=2, Strong agreed is 2+1=3, and the
-// agreed reading wins on the score alone.
+// The case #7 was opened for: a reading rated Exact that the data contradicts
+// must not beat a reading rated Strong that the data agrees with. The old
+// scale stepped Confidence itself and stopped short of Exact, so the two tied
+// at Strong and the grammar-rating tie-break handed it to the reading the data
+// had just spoken against. Uncapped, Exact contradicted is 3-1=2 and Strong
+// agreed is 2+1=3.
 func TestAgreementLiftsAPresentReadingPastAnAbsentOne(t *testing.T) {
 	exactContradicted := parse.Score(claim.ConfidenceExact, []parse.Agreement{parse.Contradicts})
 	strongAgreed := parse.Score(claim.ConfidenceStrong, []parse.Agreement{parse.Agrees})
@@ -430,10 +428,10 @@ func TestStreetAgreementDoesNotChangeAnUnambiguousReading(t *testing.T) {
 }
 
 // Two readings of one street line that differ only in which field holds a
-// word ask the data the same question, so agreement lifts both. Where the
-// split reading is already at the ceiling and the absorbed one is a step
-// below, they land together, and the grammar's own rating must be what
-// separates them — otherwise the winner is candidate order.
+// word ask the data the same question, so agreement lifts both by the same
+// amount and the grammar's gap between them survives. Under the old capped
+// scale they landed together at the ceiling and the winner was candidate
+// order; this pins the end-to-end result now that the score carries the gap.
 func TestAgreementCannotLiftAnAbsorbedReadingPastTheSplitOne(t *testing.T) {
 	source := "1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500"
 
