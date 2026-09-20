@@ -295,10 +295,10 @@ func (p *Parser) agreement(r reference, a *address.Address) []agreement {
 	return answers
 }
 
-// reference answers each zipcity question once per choice. Readings that
-// share a key get the same answer by construction, so a second query could
-// only cost a call and inflate the k in 1-0.995^k that the doc comment on
-// agreement counts.
+// reference answers each distinct zipcity question once per choice. The
+// filters are static, so asking a key twice cannot change the false-positive
+// odds; what asking once buys is that readings sharing a key are ranked on
+// one answer even if a check ever failed unstably, and one call per key.
 type reference map[string]bool
 
 func (r reference) check(key string, query func() (bool, error)) (bool, error) {
