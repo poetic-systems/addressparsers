@@ -137,9 +137,11 @@ among candidates is not, and it is the step go-projectusat leaves open
 ([#61](https://github.com/PortobelloAuth/go-projectusat/issues/61)) precisely
 because the standard cannot specify it. Ranking currently goes on the score —
 the grammar's rung plus reference data's agreements minus its contradictions —
-then on coverage. Cases like `3253 W 9200 S` — does the street name end at `S`
-or `SW`? — need the adjudicator to consult the data mid-reading rather than
-after it, and that is the next real piece.
+then on coverage. Cases like `3253 W 9200 S WEST JORDAN UT 84088` on one line
+— does the street end at the postdirectional `S`, or is `S WEST` the
+postdirectional `SW` with the city starting at `JORDAN`? — need the
+adjudicator to consult the data mid-reading rather than after it, and that is
+the next real piece.
 
 ## Handling addresses
 
