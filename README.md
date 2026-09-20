@@ -66,18 +66,22 @@ p := parser.New(parser.AddressParsingOptions{
 of the standard, and its answers depend only on its input — which is what makes
 its behaviour reproducible from the specification alone.
 
-**Reference data moves a candidate one step per question asked, in either
-direction, and never settles it.** `zipcity`'s filters are built at a 0.005
-false positive rate (set in zipcity's `internal/bloomgenerator`), so a `false`
-is definitive while a `true` is roughly 200:1 evidence rather than a
-confirmation. Both are worth acting on. Neither is proof: agreement stops below
-`ConfidenceExact`, because a reading that is certain is a claim about the
-grammar that reference data is in no position to make.
+**Reference data moves a candidate's score, not its confidence.** The score is
+this package's own integer — the grammar's rung plus one for every question
+reference data agrees with and minus one for every question it contradicts,
+uncapped in either direction (see `rung` and `score` in `parse/parse.go`).
+`zipcity`'s filters are built at a 0.005 false positive rate (set in zipcity's
+`internal/bloomgenerator`), so a `false` is definitive while a `true` is
+roughly 200:1 evidence rather than a confirmation. Both are worth acting on,
+and neither settles a reading on its own. The data orders readings against
+each other and never rates one: `CandidateAddress.Confidence` is left exactly
+as the grammar wrote it, and `Parse` returns the `Address` alone, so no score
+this package computes is ever visible to a caller.
 
 A candidate that carries a street name asks about it too — `CheckZipAndStreet`
 where the candidate has a ZIP, `CheckCityStateAndStreet` where it has a city
 and state, both when it has all three. Asking both when both are available and
-folding the answers before either moves confidence squares the odds of a
+folding the answers before either moves the score squares the odds of a
 spurious step instead of doubling them: both `true` folds to a single
 `agrees`, both `false` folds to a single `contradicts`, and a split — one
 shard finds the street, the other does not — is recorded as which side was
@@ -131,10 +135,11 @@ Early, and the interesting work is the adjudicator in `parse`.
 Assembling the pipeline is arrangement of parts that already exist. Choosing
 among candidates is not, and it is the step go-projectusat leaves open
 ([#61](https://github.com/PortobelloAuth/go-projectusat/issues/61)) precisely
-because the standard cannot specify it. Ranking currently goes on confidence,
-then on coverage, with a one-step adjustment either way from reference data. Cases like `3253 W 9200 S` — does the street name end at `S` or `SW`? —
-need the adjudicator to consult the data mid-reading rather than after it, and
-that is the next real piece.
+because the standard cannot specify it. Ranking currently goes on the score —
+the grammar's rung plus reference data's agreements minus its contradictions —
+then on coverage. Cases like `3253 W 9200 S` — does the street name end at `S`
+or `SW`? — need the adjudicator to consult the data mid-reading rather than
+after it, and that is the next real piece.
 
 ## Handling addresses
 

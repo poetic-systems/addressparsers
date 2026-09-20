@@ -146,44 +146,42 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 
 // choose ranks candidates and returns the best, or nil when none survive.
 //
-// Confidence decides, and coverage breaks ties: between two equally confident
+// The score decides, and coverage breaks ties: between two equally scored
 // readings the one stranding fewer tokens is the better account of the input.
-// Reference data moves a reading one step in either direction — see agreement.
+// The score is this package's own integer — the grammar's rung (see rung)
+// plus one for every question reference data agrees with and minus one for
+// every question it contradicts, uncapped in either direction — see score.
+// The data orders readings against each other and never rates one:
+// CandidateAddress.Confidence is left exactly as the grammar wrote it, and
+// Parse returns the Address alone, so no score this package computes is ever
+// visible to a caller.
 //
-// The grammar's own rating breaks what is left. Two readings of one street
+// A single agreement lifts a reading by one rung, which is enough to let it
+// pass a reading one rung above it that the data contradicts — that
+// inversion is the point of asking at all — but not enough to pass a reading
+// two rungs above it that nothing was asked about. Two readings of one street
 // line can differ only in which field holds a word — PENNSYLVANIA AVE as a
-// name against PENNSYLVANIA with AVE as its suffix — and the data cannot see
-// that: both ask it the same question and get the same answer. Where that
-// answer lands them on the same step, the rating the grammar gave before the
-// data spoke is the one signal that still tells them apart, and it already
-// prefers the reading that explains the suffix.
+// name against PENNSYLVANIA with AVE as its suffix — and reference data
+// cannot see that: both ask it the same key and get the same answer, so both
+// scores shift by the same amount and the grammar's own gap between them
+// survives the shift unchanged.
 func (p *Parser) choose(candidates []*address.CandidateAddress) *address.CandidateAddress {
 	type ranked struct {
 		candidate *address.CandidateAddress
-		score     claim.Confidence
+		score     int
 	}
 
+	r := reference{}
 	scored := make([]ranked, 0, len(candidates))
 	for _, c := range candidates {
 		if c == nil || c.Address == nil {
 			continue
 		}
-		score := c.Confidence
+		var answers []agreement
 		if p.opts.UseReferenceData {
-			for _, ans := range p.agreement(c.Address) {
-				switch ans {
-				case contradicts:
-					score = weaken(score)
-				case agrees:
-					score = strengthen(score)
-				case missingInZip, missingInCity:
-					// A split street answer is annotated, not stepped — see
-					// streetAgreement's doc comment for why it must not read
-					// as either an agreement or a contradiction.
-				}
-			}
+			answers = p.agreement(r, c.Address)
 		}
-		scored = append(scored, ranked{candidate: c, score: score})
+		scored = append(scored, ranked{candidate: c, score: score(c.Confidence, answers)})
 	}
 	if len(scored) == 0 {
 		return nil
@@ -193,12 +191,52 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 		if scored[i].score != scored[j].score {
 			return scored[i].score > scored[j].score
 		}
-		if len(scored[i].candidate.Leftover) != len(scored[j].candidate.Leftover) {
-			return len(scored[i].candidate.Leftover) < len(scored[j].candidate.Leftover)
-		}
-		return scored[i].candidate.Confidence > scored[j].candidate.Confidence
+		return len(scored[i].candidate.Leftover) < len(scored[j].candidate.Leftover)
 	})
 	return scored[0].candidate
+}
+
+// rung maps a grammar confidence onto this package's own 0..3 scale, in the
+// order go-projectusat's claim package defines them: Weak, Likely, Strong,
+// Exact.
+func rung(c claim.Confidence) int {
+	switch {
+	case c >= claim.ConfidenceExact:
+		return 3
+	case c >= claim.ConfidenceStrong:
+		return 2
+	case c >= claim.ConfidenceLikely:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// score is this package's ranking of one reading: the grammar's rung plus
+// one for every agrees and minus one for every contradicts, uncapped in
+// either direction. missingInZip, missingInCity, and unknown add nothing —
+// see agreement's doc comment for why a split or a decline is not evidence.
+//
+// It is uncapped because there is nothing here left for a cap to protect.
+// The old scale stepped claim.Confidence itself and stopped short of
+// ConfidenceExact so that agreement could never manufacture certainty, but
+// that cap also meant a reading rated Exact that the data contradicted
+// (stepped down to Strong) tied a reading rated Strong that the data agreed
+// with (capped at Strong) — and the tie-break on the grammar's own rating
+// then picked the one the data had just spoken against. Scoring on this
+// package's own integer instead of on Confidence removes the seam: nothing
+// is capped, so the ordering the data is asked to make is the one it gets.
+func score(c claim.Confidence, answers []agreement) int {
+	s := rung(c)
+	for _, ans := range answers {
+		switch ans {
+		case agrees:
+			s++
+		case contradicts:
+			s--
+		}
+	}
+	return s
 }
 
 // agreement is what the reference data had to say about a reading.
@@ -234,40 +272,59 @@ const (
 // from bloom filters built at a 0.005 false positive rate (the rate is set in
 // zipcity's `internal/bloomgenerator`), so a false is definitive — the key was
 // never added — while a true is a likelihood ratio of about 200:1 in favour of
-// the pairing rather than a confirmation of it. Both move a candidate by one
-// step and neither settles it: querying several mutually exclusive readings
-// that are all genuinely absent yields a spurious true about 1-0.995^k of the
-// time, so a true must not be allowed to resolve a reading on its own, and
-// must never be reported to a caller as verification.
+// the pairing rather than a confirmation of it. Both move a candidate's score
+// by one unit and neither settles it: querying several mutually exclusive
+// readings that are all genuinely absent yields a spurious true about
+// 1-0.995^k of the time, so a true must not be allowed to resolve a reading
+// on its own, and must never be reported to a caller as verification.
 //
 // A contradiction is likewise not proof the address is wrong. zipcity is built
 // from Census TIGER files with documented gaps, so a real address the Census
-// missed lands here too. That is why every answer is one step of confidence
+// missed lands here too. That is why every answer is one point of score
 // rather than rejection, and why UseReferenceData is off by default.
-func (p *Parser) agreement(a *address.Address) []agreement {
+func (p *Parser) agreement(r reference, a *address.Address) []agreement {
 	var answers []agreement
 
-	if ans, ok := zipCityAgreement(a); ok {
+	if ans, ok := zipCityAgreement(r, a); ok {
 		answers = append(answers, ans)
 	}
-	if ans, ok := streetAgreement(a); ok {
+	if ans, ok := streetAgreement(r, a); ok {
 		answers = append(answers, ans)
 	}
 
 	return answers
 }
 
+// reference answers each zipcity question once per choice. Readings that
+// share a key get the same answer by construction, so a second query could
+// only cost a call and inflate the k in 1-0.995^k that the doc comment on
+// agreement counts.
+type reference map[string]bool
+
+func (r reference) check(key string, query func() (bool, error)) (bool, error) {
+	if present, ok := r[key]; ok {
+		return present, nil
+	}
+	present, err := query()
+	if err == nil {
+		r[key] = present
+	}
+	return present, err
+}
+
 // zipCityAgreement asks whether the ZIP and city pair. It declines, rather
 // than answering, when there is nothing to ask about or zipcity could not be
 // consulted: an address the data cannot speak to is not thereby a better or a
 // worse reading.
-func zipCityAgreement(a *address.Address) (agreement, bool) {
+func zipCityAgreement(r reference, a *address.Address) (agreement, bool) {
 	m := zip5.FindStringSubmatch(a.Postal)
 	if m == nil || a.City == "" {
 		return unknown, false
 	}
 
-	present, err := zipcity.CheckZipAndCity(m[1], a.City)
+	present, err := r.check("zip city "+m[1]+" "+a.City, func() (bool, error) {
+		return zipcity.CheckZipAndCity(m[1], a.City)
+	})
 	if err != nil {
 		return unknown, false
 	}
@@ -302,7 +359,7 @@ func zipCityAgreement(a *address.Address) (agreement, bool) {
 // (MatchZipAndStreet's directional-variant sweep is a different kind of
 // asking twice — several spellings of one street rather than two shards of
 // one spelling — and is still deliberately unused here; see streetForQuery.)
-func streetAgreement(a *address.Address) (agreement, bool) {
+func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
 		return unknown, false
 	}
@@ -320,14 +377,18 @@ func streetAgreement(a *address.Address) (agreement, bool) {
 
 	var inZip, inCity bool
 	if hasZip {
-		present, err := zipcity.CheckZipAndStreet(m[1], street)
+		present, err := r.check("zip street "+m[1]+" "+street, func() (bool, error) {
+			return zipcity.CheckZipAndStreet(m[1], street)
+		})
 		if err != nil {
 			return unknown, false
 		}
 		inZip = present
 	}
 	if hasCity {
-		present, err := zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
+		present, err := r.check("city street "+a.City+" "+a.Region+" "+street, func() (bool, error) {
+			return zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
+		})
 		if err != nil {
 			return unknown, false
 		}
@@ -376,40 +437,4 @@ func answerFor(present bool) agreement {
 		return agrees
 	}
 	return contradicts
-}
-
-// weaken lowers a confidence by one step on the shared scale, stopping at the
-// bottom. A demoted reading is worse than it claimed but is still a reading.
-func weaken(c claim.Confidence) claim.Confidence {
-	switch {
-	case c > claim.ConfidenceStrong:
-		return claim.ConfidenceStrong
-	case c > claim.ConfidenceLikely:
-		return claim.ConfidenceLikely
-	case c > claim.ConfidenceWeak:
-		return claim.ConfidenceWeak
-	default:
-		return c
-	}
-}
-
-// strengthen raises a confidence by one step, stopping below ConfidenceExact.
-//
-// The cap is the point. ConfidenceExact means a vocabulary had exactly one
-// reading of the tokens, which is a claim about the grammar that reference data
-// is in no position to make. A filter that may answer true by collision must
-// not be able to manufacture certainty, so agreement can carry a reading up to
-// ConfidenceStrong and no further. A candidate already at ConfidenceExact keeps
-// it — agreement never lowers a reading it supports.
-func strengthen(c claim.Confidence) claim.Confidence {
-	switch {
-	case c >= claim.ConfidenceStrong:
-		return c
-	case c >= claim.ConfidenceLikely:
-		return claim.ConfidenceStrong
-	case c >= claim.ConfidenceWeak:
-		return claim.ConfidenceLikely
-	default:
-		return claim.ConfidenceWeak
-	}
 }
