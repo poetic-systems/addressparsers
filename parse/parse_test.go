@@ -166,46 +166,131 @@ func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
 	}
 }
 
-// Reference data may raise a reading, but it may not make one certain.
-//
-// ConfidenceExact means a vocabulary had exactly one reading of the tokens.
-// zipcity's filters answer true by collision about one time in a hundred, so
-// letting agreement reach Exact would let a collision manufacture the strongest
-// claim the scale can express. See go-projectusat#71.
-func TestAgreementCannotManufactureCertainty(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		from claim.Confidence
-		want claim.Confidence
-	}{
-		{"weak rises to likely", claim.ConfidenceWeak, claim.ConfidenceLikely},
-		{"likely rises to strong", claim.ConfidenceLikely, claim.ConfidenceStrong},
-		{"strong stops below exact", claim.ConfidenceStrong, claim.ConfidenceStrong},
-		{"exact is kept, not lowered", claim.ConfidenceExact, claim.ConfidenceExact},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := parse.Strengthen(tc.from); got != tc.want {
-				t.Errorf("Strengthen(%d) = %d, want %d", tc.from, got, tc.want)
-			}
-		})
+// Aaron's case, and the reason the capped scale had to go: a reading rated
+// Exact that the data contradicts must not beat a reading rated Strong that
+// the data agrees with. The old scale stepped Confidence itself and stopped
+// short of Exact, so the two tied at Strong and the grammar-rating tie-break
+// — which still preferred the contradicted reading — decided it, meaning the
+// contradiction never actually moved the outcome. The uncapped score has no
+// tie to break: Exact contradicted is 3-1=2, Strong agreed is 2+1=3, and the
+// agreed reading wins on the score alone.
+func TestAgreementLiftsAPresentReadingPastAnAbsentOne(t *testing.T) {
+	exactContradicted := parse.Score(claim.ConfidenceExact, []parse.Agreement{parse.Contradicts})
+	strongAgreed := parse.Score(claim.ConfidenceStrong, []parse.Agreement{parse.Agrees})
+	if exactContradicted >= strongAgreed {
+		t.Errorf("Score(Exact, Contradicts) = %d, Score(Strong, Agrees) = %d; want the agreed reading ahead",
+			exactContradicted, strongAgreed)
 	}
 }
 
-// A step up and a step down are not required to cancel, but neither may run
-// away: repeated agreement must not climb past the cap, and repeated
-// contradiction must not fall below the floor.
-func TestTheStepsAreBounded(t *testing.T) {
-	up := claim.ConfidenceWeak
-	down := claim.ConfidenceExact
-	for range 10 {
-		up = parse.Strengthen(up)
-		down = parse.Weaken(down)
+// A single agreement moves a reading by one rung, which is enough to pass a
+// reading one rung above it that the data spoke against — that inversion is
+// the whole point of asking — but not enough to pass a reading two rungs
+// above it that nothing was asked about at all. The data orders readings
+// against each other; it does not manufacture a gap the grammar never gave.
+func TestAgreementCannotCarryAReadingAcrossATwoRungGap(t *testing.T) {
+	likelyAgreed := parse.Score(claim.ConfidenceLikely, []parse.Agreement{parse.Agrees})
+	exactUntouched := parse.Score(claim.ConfidenceExact, nil)
+	if likelyAgreed >= exactUntouched {
+		t.Errorf("Score(Likely, Agrees) = %d, Score(Exact, nil) = %d; want the untouched exact reading ahead",
+			likelyAgreed, exactUntouched)
 	}
-	if up != claim.ConfidenceStrong {
-		t.Errorf("repeated agreement reached %d, want %d", up, claim.ConfidenceStrong)
+}
+
+// Two readings of one street line that share a zipcity key ask it once and
+// get back the same answer, so agreement shifts both of their scores by the
+// same amount. Whatever gap the grammar put between two rungs, applying the
+// same answers to both must leave the sign of that gap alone — that is the
+// fact that lets choose retire the grammar-rating tie-break and rely on the
+// score's own ordering instead.
+func TestSharedAnswersPreserveTheGrammarsGap(t *testing.T) {
+	rungs := []claim.Confidence{
+		claim.ConfidenceWeak, claim.ConfidenceLikely, claim.ConfidenceStrong, claim.ConfidenceExact,
 	}
-	if down != claim.ConfidenceWeak {
-		t.Errorf("repeated contradiction reached %d, want %d", down, claim.ConfidenceWeak)
+	for _, answers := range [][]parse.Agreement{{parse.Agrees}, {parse.Contradicts}} {
+		for _, lo := range rungs {
+			for _, hi := range rungs {
+				if parse.Rung(lo) >= parse.Rung(hi) {
+					continue
+				}
+				loScore := parse.Score(lo, answers)
+				hiScore := parse.Score(hi, answers)
+				if loScore >= hiScore {
+					t.Errorf("answers %v: Score(%d) = %d, Score(%d) = %d; want the higher rung still ahead",
+						answers, lo, loScore, hi, hiScore)
+				}
+			}
+		}
+	}
+}
+
+// missingInZip, missingInCity, and unknown are not evidence — see agreement's
+// doc comment for why a split street answer or a declined question must not
+// read as either an agreement or a contradiction — so none of them may move
+// a reading off the rung the grammar gave it.
+func TestSplitsAndDeclinesAddNothing(t *testing.T) {
+	rungs := []claim.Confidence{
+		claim.ConfidenceWeak, claim.ConfidenceLikely, claim.ConfidenceStrong, claim.ConfidenceExact,
+	}
+	for _, ans := range []parse.Agreement{parse.MissingInZip, parse.MissingInCity, parse.Unknown} {
+		for _, c := range rungs {
+			if got, want := parse.Score(c, []parse.Agreement{ans}), parse.Rung(c); got != want {
+				t.Errorf("Score(%d, %v) = %d, want %d (the bare rung)", c, ans, got, want)
+			}
+		}
+	}
+}
+
+// choose builds one reference per call so that two readings asking the same
+// key cost zipcity a single query. A query that keeps a counter is the only
+// way to see that from outside the package.
+func TestReferenceAsksEachKeyOnce(t *testing.T) {
+	r := parse.Reference{}
+	calls := 0
+	query := func() (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	first, err := parse.Check(r, "key", query)
+	if err != nil {
+		t.Fatalf("first check: %v", err)
+	}
+	second, err := parse.Check(r, "key", query)
+	if err != nil {
+		t.Fatalf("second check: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("query ran %d times, want 1", calls)
+	}
+	if first != second {
+		t.Errorf("first = %v, second = %v, want the cached answer both times", first, second)
+	}
+}
+
+// An error means zipcity was not actually consulted, so it must not be
+// cached — caching it would silently turn "we don't know" into a permanent
+// false for the rest of the call. check's own logic only stores the answer
+// when err is nil; this pins that down from outside the package.
+func TestReferenceDoesNotCacheAnError(t *testing.T) {
+	r := parse.Reference{}
+	calls := 0
+	flaky := func() (bool, error) {
+		calls++
+		if calls == 1 {
+			return false, errors.New("zipcity unavailable")
+		}
+		return true, nil
+	}
+
+	if _, err := parse.Check(r, "key", flaky); err == nil {
+		t.Fatal("want the first call's error")
+	}
+	if _, err := parse.Check(r, "key", flaky); err != nil {
+		t.Fatalf("second check: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("query ran %d times, want 2 — an erroring query must not be cached", calls)
 	}
 }
 
