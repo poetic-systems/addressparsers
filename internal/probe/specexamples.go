@@ -31,7 +31,12 @@ type example struct {
 	correct   string
 }
 
-var examples = []example{
+// mainland is every example from the standard's mainland tables (p.16-22,
+// p.35). A fragment among them is completed with mainlandLastLine, the
+// standard's own general-delivery city (p.22), rather than a Puerto Rico
+// last line: San Juan would engage the Puerto Rico address type these
+// examples are not illustrating.
+var mainland = []example{
 	// Predirectional
 	{16, "NORTH BAY STREET", "N BAY STREET"},
 	{16, "EAST END AVE", "E END AVE"},
@@ -60,6 +65,16 @@ var examples = []example{
 	// Post office box
 	{22, "POST OFFICE BOX 11890", "PO BOX 11890"},
 	{22, "POST OFFICE BOX G", "PO BOX G"},
+	// Business addresses
+	{35, "BIG BUSINESS INCORPORATED\n12 EAST BUSINESS LANE, SUITE-209\nKRYTON,TN\n38188-0002", "BIG BUSINESS INC\n12 E BUSINESS LN STE 209\nKRYTON, TN 38188-0022"},
+	{35, "PIZZA DELIVERY COMPANY\n61-20 EAST RIVER DRIVE\nNEW YORK, NY 10021-0905", "PIZZA DELIVERY COMPANY\n61-20 E RIVER DR\nNEW YORK NY 10021-0905"},
+}
+
+// puertoRico is every example from the standard's Puerto Rico tables (p.25-
+// 31): apartment buildings, urbanizations, and highway contract routes all
+// engage the Puerto Rico address type, so a fragment among them is completed
+// with puertoRicoLastLine instead of a mainland city.
+var puertoRico = []example{
 	// Puerto Rico: apartment buildings and condominiums
 	{25, "COND VERDE APT 1120", "1 COND VERDE APT 1120"},
 	{25, "VISTA SUITES III APT 104", "3 VISTA SUITES APT 104"},
@@ -92,15 +107,27 @@ var examples = []example{
 	// Highway contract routes
 	{31, "Ruta Estrella 1 Buzón 18", "HC 1 BOX 18"},
 	{31, "HC 03 Bzn 1050", "HC 1 BOX 1050"},
-	// Business addresses
-	{35, "BIG BUSINESS INCORPORATED\n12 EAST BUSINESS LANE, SUITE-209\nKRYTON,TN\n38188-0002", "BIG BUSINESS INC\n12 E BUSINESS LN STE 209\nKRYTON, TN 38188-0022"},
-	{35, "PIZZA DELIVERY COMPANY\n61-20 EAST RIVER DRIVE\nNEW YORK, NY 10021-0905", "PIZZA DELIVERY COMPANY\n61-20 E RIVER DR\nNEW YORK NY 10021-0905"},
 }
 
-// lastLine completes a fragment so the parser has a whole address to read;
-// lastLinePattern is how a fragment is told from an example that has one.
-const lastLine = "\nSAN JUAN PR 00907"
+// group pairs a table of examples with the last line that completes a
+// fragment among them.
+type group struct {
+	examples []example
+	lastLine string
+}
 
+const (
+	mainlandLastLine   = "\nTAMPA FL 33602"
+	puertoRicoLastLine = "\nSAN JUAN PR 00907"
+)
+
+var groups = []group{
+	{mainland, mainlandLastLine},
+	{puertoRico, puertoRicoLastLine},
+}
+
+// lastLinePattern is how a fragment is told from an example that already has
+// a last line of its own.
 var lastLinePattern = regexp.MustCompile(`\b[A-Z]{2},? [0-9]{5}(-[0-9]{4})?$`)
 
 func main() {
@@ -118,24 +145,27 @@ func main() {
 	}
 	hasLastLine := func(s string) bool { return lastLinePattern.MatchString(s) }
 
-	fixed, reached := 0, 0
+	total, fixed, reached := 0, 0, 0
 	fmt.Printf("%-4s %-8s %-8s %s\n", "page", "fixed", "reached", "correct → normalize(correct) | normalize(incorrect)")
-	for _, e := range examples {
-		correct, incorrect := e.correct, e.incorrect
-		if !hasLastLine(correct) {
-			correct += lastLine
-			incorrect += lastLine
+	for _, g := range groups {
+		for _, e := range g.examples {
+			total++
+			correct, incorrect := e.correct, e.incorrect
+			if !hasLastLine(correct) {
+				correct += g.lastLine
+				incorrect += g.lastLine
+			}
+			nc, ni := normalize(correct), normalize(incorrect)
+			isFixed, isReached := nc == correct, ni == correct
+			if isFixed {
+				fixed++
+			}
+			if isReached {
+				reached++
+			}
+			fmt.Printf("p.%-2d %-8v %-8v %q → %q | %q\n", e.page, isFixed, isReached,
+				strings.TrimSuffix(e.correct, g.lastLine), strings.TrimSuffix(nc, g.lastLine), strings.TrimSuffix(ni, g.lastLine))
 		}
-		nc, ni := normalize(correct), normalize(incorrect)
-		isFixed, isReached := nc == correct, ni == correct
-		if isFixed {
-			fixed++
-		}
-		if isReached {
-			reached++
-		}
-		fmt.Printf("p.%-2d %-8v %-8v %q → %q | %q\n", e.page, isFixed, isReached,
-			strings.TrimSuffix(e.correct, lastLine), strings.TrimSuffix(nc, lastLine), strings.TrimSuffix(ni, lastLine))
 	}
-	fmt.Printf("\n%d examples: %d correct forms are fixed points, %d incorrect forms reach their correct form\n", len(examples), fixed, reached)
+	fmt.Printf("\n%d examples: %d correct forms are fixed points, %d incorrect forms reach their correct form\n", total, fixed, reached)
 }
