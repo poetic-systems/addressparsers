@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	goprojectusat "github.com/PortobelloAuth/go-projectusat"
@@ -96,8 +97,11 @@ var examples = []example{
 	{35, "PIZZA DELIVERY COMPANY\n61-20 EAST RIVER DRIVE\nNEW YORK, NY 10021-0905", "PIZZA DELIVERY COMPANY\n61-20 E RIVER DR\nNEW YORK NY 10021-0905"},
 }
 
-// lastLine completes a fragment so the parser has a whole address to read.
+// lastLine completes a fragment so the parser has a whole address to read;
+// lastLinePattern is how a fragment is told from an example that has one.
 const lastLine = "\nSAN JUAN PR 00907"
+
+var lastLinePattern = regexp.MustCompile(`[A-Z]{2},? [0-9]{5}`)
 
 func main() {
 	p := parse.New(parse.Options{})
@@ -112,7 +116,7 @@ func main() {
 		}
 		return out
 	}
-	hasLastLine := func(s string) bool { return strings.Contains(s, " PR 0") || strings.Contains(s, " FL 3") || strings.Contains(s, "TN") || strings.Contains(s, " NY 1") }
+	hasLastLine := func(s string) bool { return lastLinePattern.MatchString(s) }
 
 	fixed, reached := 0, 0
 	fmt.Printf("%-4s %-8s %-8s %s\n", "page", "fixed", "reached", "correct → normalize(correct) | normalize(incorrect)")
