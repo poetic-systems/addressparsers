@@ -101,7 +101,7 @@ var examples = []example{
 // lastLinePattern is how a fragment is told from an example that has one.
 const lastLine = "\nSAN JUAN PR 00907"
 
-var lastLinePattern = regexp.MustCompile(`[A-Z]{2},? [0-9]{5}`)
+var lastLinePattern = regexp.MustCompile(`\b[A-Z]{2},? [0-9]{5}(-[0-9]{4})?$`)
 
 func main() {
 	p := parse.New(parse.Options{})
