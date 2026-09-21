@@ -265,8 +265,10 @@ const (
 )
 
 // agreement asks zipcity every question this reading supports and reports
-// each answer, in the order asked: zip+city first, then the street question,
-// folded from up to two zipcity calls into one answer — see streetAgreement.
+// each answer, in the order asked: zip+city first (or city+state, when there
+// is no ZIP Code to pair the city with — see cityZipsAgreement), then the
+// street question, folded from up to two zipcity calls into one answer — see
+// streetAgreement.
 //
 // Every answer is evidence, and none of them are symmetric. zipcity answers
 // from bloom filters built at a 0.005 false positive rate (the rate is set in
@@ -286,6 +288,8 @@ func (p *Parser) agreement(r reference, a *address.Address) []agreement {
 	var answers []agreement
 
 	if ans, ok := zipCityAgreement(r, a); ok {
+		answers = append(answers, ans)
+	} else if ans, ok := cityZipsAgreement(r, a); ok {
 		answers = append(answers, ans)
 	}
 	if ans, ok := streetAgreement(r, a); ok {
@@ -324,6 +328,40 @@ func zipCityAgreement(r reference, a *address.Address) (agreement, bool) {
 
 	present, err := r.check("zip city "+m[1]+" "+a.City, func() (bool, error) {
 		return zipcity.CheckZipAndCity(m[1], a.City)
+	})
+	if err != nil {
+		return unknown, false
+	}
+	return answerFor(present), true
+}
+
+// cityZipsAgreement asks, for a reading with a city and a two-letter region
+// but no ZIP Code, whether the data has seen that city anywhere in that
+// state: ZipsKnownFor yields a code for it or yields nothing. It is
+// zipCityAgreement's question read the other way, and it is asked only when
+// that one cannot be, since a city known for this ZIP Code is stronger
+// evidence than a city known somewhere in the state.
+//
+// An empty answer is definitive in the sense a false from the zip-city
+// filter is — the name was never seen for any code in the state, in GeoNames
+// or in TIGER — and is charged the same one point, no more: zipcity's own
+// caveat that the list is neither complete nor preferred-first holds, and a
+// real city the data missed still parses. What the point buys is the split
+// nothing else marks: with no ZIP Code and no comma, 123 MAIN ST WEST PALM
+// BEACH FL reads as well with ST WEST PALM BEACH for its city as with WEST
+// PALM BEACH, and only the data knows one of those is a place
+// (addressparsers#17). Which of the city's codes the address belongs to is
+// not asked here; that is the street question's business.
+func cityZipsAgreement(r reference, a *address.Address) (agreement, bool) {
+	if zip5.MatchString(a.Postal) || a.City == "" || len(a.Region) != 2 {
+		return unknown, false
+	}
+
+	present, err := r.check("city zips "+a.Region+" "+a.City, func() (bool, error) {
+		for range zipcity.ZipsKnownFor(a.Region, a.City) {
+			return true, nil
+		}
+		return false, nil
 	})
 	if err != nil {
 		return unknown, false

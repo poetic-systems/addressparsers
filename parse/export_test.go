@@ -46,6 +46,7 @@ func Check(r Reference, key string, query func() (bool, error)) (bool, error) {
 // own to pass in.
 var (
 	ZipCityAgreement  = func(a *address.Address) (agreement, bool) { return zipCityAgreement(reference{}, a) }
+	CityZipsAgreement = func(a *address.Address) (agreement, bool) { return cityZipsAgreement(reference{}, a) }
 	StreetAgreement   = func(a *address.Address) (agreement, bool) { return streetAgreement(reference{}, a) }
 	StreetForQuery    = streetForQuery
 	FoldStreetAnswers = foldStreetAnswers

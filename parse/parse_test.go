@@ -346,6 +346,59 @@ func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
 	}
 }
 
+// With no ZIP Code to pair the city with, the city is asked about on its own:
+// has the state ever had a place by that name. It is asked only then — a ZIP
+// Code present means zipCityAgreement's stronger question is the one to ask
+// — and only when there is a two-letter region to ask it of.
+func TestCityZipsAgreementAsksTheStateWhenThereIsNoZip(t *testing.T) {
+	real := &address.Address{City: "WEST PALM BEACH", Region: "FL"}
+	if ans, ok := parse.CityZipsAgreement(real); !ok || ans != parse.Agrees {
+		t.Errorf("CityZipsAgreement(real city) = %v, %v, want Agrees, true", ans, ok)
+	}
+
+	absent := &address.Address{City: "ST WEST PALM BEACH", Region: "FL"}
+	if ans, ok := parse.CityZipsAgreement(absent); !ok || ans != parse.Contradicts {
+		t.Errorf("CityZipsAgreement(absent city) = %v, %v, want Contradicts, true", ans, ok)
+	}
+
+	for name, a := range map[string]*address.Address{
+		"with a ZIP":     {City: "WEST PALM BEACH", Region: "FL", Postal: "33401"},
+		"without region": {City: "WEST PALM BEACH"},
+		"without city":   {Region: "FL"},
+	} {
+		if ans, ok := parse.CityZipsAgreement(a); ok {
+			t.Errorf("CityZipsAgreement(%s) = %v, true; want it to decline", name, ans)
+		}
+	}
+}
+
+// Without a ZIP Code or a comma nothing in the grammar says where the street
+// ends and the city begins: 123 NORTH PARK ST PAUL MN reads as well with PARK
+// ST PAUL for its city as with ST PAUL, and lastline offers both. The data
+// knows only one of them is a place in Minnesota, and that is what splits
+// the line (addressparsers#17). The same holds for ST WEST PALM BEACH against
+// the two real places behind it — which of those two is not the data's
+// call here, since both are real.
+func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	a, err := withData.Parse("123 NORTH PARK ST PAUL MN")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if a.City != "ST PAUL" {
+		t.Errorf("City = %q, want ST PAUL", a.City)
+	}
+
+	a, err = withData.Parse("123 MAIN ST WEST PALM BEACH FL")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if a.City != "WEST PALM BEACH" && a.City != "PALM BEACH" {
+		t.Errorf("City = %q, want WEST PALM BEACH or PALM BEACH", a.City)
+	}
+}
+
 // The closed forms carry a fixed pseudo street name — "PO BOX" is not a
 // street zipcity was ever asked about — so StreetAgreement must decline
 // rather than manufacture a contradiction on every one of them.
