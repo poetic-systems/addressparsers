@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/PortobelloAuth/go-projectusat v0.0.0-20260922130420-9427c72225b9
-	github.com/poetic-systems/zipcity v0.0.0-20260919190404-73c424913bb6
+	github.com/poetic-systems/zipcity v0.0.0-20260922170358-9d0ac0f7fda7
 )
 
 require (
