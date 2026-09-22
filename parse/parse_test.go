@@ -529,3 +529,65 @@ func TestASplitStreetAnswerTakesNoStep(t *testing.T) {
 		t.Errorf("a split street answer moved a reading:\n without = %+v\n with    = %+v", plain, withData)
 	}
 }
+
+// The string zipcity answers about has to be the string the caller will hash.
+// A reading whose StreetName absorbs the suffix word and the directional —
+// E as a predirectional, ST NW as the name — is written E ST NW and emitted
+// E STREET NORTHWEST, because the normalizer spells both out inside a
+// multi-word name. Asking about the form it is written in collects evidence
+// for an address that is never produced.
+func TestStreetForQueryAsksTheStreetThatWillBeEmitted(t *testing.T) {
+	absorbed := &address.Address{
+		Type:           &ordinarystreet.OrdinaryStreetAddress{},
+		Predirectional: "E",
+		StreetName:     "ST NW",
+	}
+	if got, want := parse.StreetForQuery(absorbed), "E STREET NORTHWEST"; got != want {
+		t.Errorf("StreetForQuery(absorbed) = %q, want %q", got, want)
+	}
+
+	// A reading that puts each word in its own field is already written the
+	// way it is emitted, so normalizing changes nothing — which is why asking
+	// the fields as written was right for every reading but the absorbed one.
+	split := &address.Address{
+		Type:            &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName:      "E",
+		StreetSuffix:    "ST",
+		Postdirectional: "NW",
+	}
+	if got, want := parse.StreetForQuery(split), "E ST NW"; got != want {
+		t.Errorf("StreetForQuery(split) = %q, want %q", got, want)
+	}
+}
+
+// amadsen on go-projectusat#112: a valid directional street name stays
+// written out, and a valid alphabetic one stays a letter. Washington DC has
+// E ST NW and no EAST ST NW, so the absorbed reading used to collect the
+// agreement E ST NW earned and win with it. With both readings asked about
+// the street they would emit, neither is a street zipcity has, nothing is
+// promoted, and the grammar keeps EAST as the name.
+func TestADirectionalStreetNameIsNotTradedForAnAbsorbedReading(t *testing.T) {
+	p := parse.New(parse.Options{UseReferenceData: true})
+
+	directional, err := p.Parse("100 EAST ST NW, WASHINGTON, DC 20004")
+	if err != nil {
+		t.Fatalf("Parse(EAST) error = %v", err)
+	}
+	if directional.StreetName != "EAST" {
+		t.Errorf("StreetName = %q, want EAST (pre=%q suf=%q post=%q)",
+			directional.StreetName, directional.Predirectional,
+			directional.StreetSuffix, directional.Postdirectional)
+	}
+
+	// The alphabetic street the data does have is unchanged: it still agrees
+	// and still wins, so this is not the demotion of one reading but the two
+	// being asked about themselves.
+	alphabetic, err := p.Parse("100 E ST NW, WASHINGTON, DC 20004")
+	if err != nil {
+		t.Fatalf("Parse(E) error = %v", err)
+	}
+	if alphabetic.StreetName != "E" || alphabetic.StreetSuffix != "ST" || alphabetic.Postdirectional != "NW" {
+		t.Errorf("got name=%q suffix=%q post=%q, want E / ST / NW",
+			alphabetic.StreetName, alphabetic.StreetSuffix, alphabetic.Postdirectional)
+	}
+}
