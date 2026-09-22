@@ -18,6 +18,7 @@ import (
 	"sort"
 
 	"github.com/PortobelloAuth/go-projectusat/pkg/address"
+	"github.com/PortobelloAuth/go-projectusat/pkg/address/normalizer"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/token"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/generaldelivery"
@@ -590,9 +591,41 @@ func foldStreetAnswers(zipPresent, cityPresent bool) agreement {
 // street multiplies the chance of a spurious true (see the 13:08Z comment on
 // go-projectusat#71) for the sake of a question agreement already answered
 // honestly once.
+//
+// The four fields are normalized before they are joined, because the string
+// that has to be real is the one the caller will hash, not the one the reading
+// happens to be written in. The two are usually the same word for word, which
+// is why asking the fields as written worked for as long as it did. They come
+// apart when a reading's StreetName absorbs a suffix word or a directional:
+// the normalizer spells those out inside a multi-word name, so the reading
+// that offers ST NW as a name asks zipcity about E ST NW, which Washington DC
+// has, and then emits E STREET NORTHWEST, which it does not. Scoring a reading
+// on a rendering nobody will ever hash is how 100 EAST ST NW came to beat the
+// reading that keeps EAST as the street name.
+//
+// It is the content normalizer rather than the matching one because the two
+// differ, over these four fields, only in whether diacritics are substituted,
+// and substituting them is a question about zipcity's keys that #1 over there
+// has open. Preserving them is what the fields as written already did.
 func streetForQuery(a *address.Address) string {
-	return textutil.JoinNonEmpty(" ", a.Predirectional, a.StreetName, a.StreetSuffix, a.Postdirectional)
+	street := &address.Address{
+		Predirectional:  a.Predirectional,
+		StreetName:      a.StreetName,
+		StreetSuffix:    a.StreetSuffix,
+		Postdirectional: a.Postdirectional,
+	}
+	// An unreadable vocabulary word is the normalizer declining to rewrite
+	// the street, not a reason to decline to ask about it: the fields as
+	// written are still the best rendering available.
+	if normalized, err := queryNormalizer.Normalize(street); err == nil {
+		street = normalized
+	}
+	return textutil.JoinNonEmpty(" ", street.Predirectional, street.StreetName, street.StreetSuffix, street.Postdirectional)
 }
+
+// queryNormalizer renders a street the way the caller will write it. It holds
+// no state between calls.
+var queryNormalizer = normalizer.NewContentNomalizer()
 
 // answerFor turns a bloom filter's boolean into the agreement it represents.
 func answerFor(present bool) agreement {
