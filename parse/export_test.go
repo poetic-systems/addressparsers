@@ -45,9 +45,12 @@ func Check(r Reference, key string, query func() (bool, error)) (bool, error) {
 // existing tests exercise one reading at a time and have no cache of their
 // own to pass in.
 var (
-	ZipCityAgreement  = func(a *address.Address) (agreement, bool) { return zipCityAgreement(reference{}, a) }
-	CityZipsAgreement = func(a *address.Address) (agreement, bool) { return cityZipsAgreement(reference{}, a) }
+	ZipCityAgreement  = func(a *address.Address) (agreement, bool) { return zipCityAgreement(reference{}, a.Postal, a.City) }
+	CityZipsAgreement = func(a *address.Address) (agreement, bool) {
+		return cityZipsAgreement(reference{}, a.Postal, a.City, a.Region)
+	}
 	StreetAgreement   = func(a *address.Address) (agreement, bool) { return streetAgreement(reference{}, a) }
 	StreetForQuery    = streetForQuery
+	StreetConfidence  = streetConfidence
 	FoldStreetAnswers = foldStreetAnswers
 )

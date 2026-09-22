@@ -434,6 +434,69 @@ func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
 	}
 }
 
+// Intake data is not consistent about commas, and a comma must not change the
+// hash (#20). It used to: with the comma the last line is marked and the
+// street reading ordinarystreet rates highest wins, and without it the city
+// claim comes in a rung lower and CandidateAddress.Confidence — the minimum
+// over the accepted claims — flattens every reading of the street line to the
+// city's own confidence, so enumeration order picked the street instead.
+func TestACommaDoesNotChangeTheStreet(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	for _, marked := range []string{
+		"123 OCEAN BOULEVARD, WEST PALM BEACH, FL",
+		"123 MAIN STREET, WEST PALM BEACH, FL",
+		"3253 W 9200 S, WEST JORDAN, UT",
+		"123 NORTH PARK ST, ST PAUL, MN",
+	} {
+		unmarked := strings.ReplaceAll(marked, ",", "")
+
+		a, err := withData.Parse(marked)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", marked, err)
+			continue
+		}
+		b, err := withData.Parse(unmarked)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", unmarked, err)
+			continue
+		}
+
+		got := []string{b.Predirectional, b.StreetName, b.StreetSuffix, b.Postdirectional, b.City}
+		want := []string{a.Predirectional, a.StreetName, a.StreetSuffix, a.Postdirectional, a.City}
+		if !slices.Equal(got, want) {
+			t.Errorf("Parse(%q)\n got  pre/name/suffix/post/city = %q\n want (from %q)            = %q", unmarked, got, marked, want)
+		}
+	}
+}
+
+// StreetConfidence reads the street line's own rating off the claims the
+// reading accepted, which is what the candidate's minimum destroyed. A
+// reading with no street line has nothing to rate and reports what it is
+// already held at, so that this tie-break neither lifts a post office box
+// above a street nor drops it below one.
+func TestStreetConfidenceReadsTheStreetAndNothingElse(t *testing.T) {
+	street := &address.CandidateAddress{
+		Confidence: claim.ConfidenceLikely,
+		Claims: []claim.Claim{
+			{Confidence: claim.ConfidenceExact, Parts: []claim.ClaimPart{{Part: claim.PartStreetName}}},
+			{Confidence: claim.ConfidenceStrong, Parts: []claim.ClaimPart{{Part: claim.PartStreetSuffix}}},
+			{Confidence: claim.ConfidenceWeak, Parts: []claim.ClaimPart{{Part: claim.PartCity}}},
+		},
+	}
+	if got := parse.StreetConfidence(street); got != claim.ConfidenceStrong {
+		t.Errorf("StreetConfidence(street) = %v, want %v — the city must not be counted", got, claim.ConfidenceStrong)
+	}
+
+	box := &address.CandidateAddress{
+		Confidence: claim.ConfidenceExact,
+		Claims:     []claim.Claim{{Confidence: claim.ConfidenceWeak, Parts: []claim.ClaimPart{{Part: claim.PartCity}}}},
+	}
+	if got := parse.StreetConfidence(box); got != claim.ConfidenceExact {
+		t.Errorf("StreetConfidence(no street) = %v, want %v", got, claim.ConfidenceExact)
+	}
+}
+
 // The closed forms carry a fixed pseudo street name — "PO BOX" is not a
 // street zipcity was ever asked about — so StreetAgreement must decline
 // rather than manufacture a contradiction on every one of them.
