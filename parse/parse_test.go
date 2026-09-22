@@ -408,6 +408,17 @@ func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
 // only the form nothing else marks. Spelling the suffix out, breaking the
 // line, or naming a state the city is real in each still reaches the other
 // reading, so the data narrows the ambiguity rather than deciding it.
+//
+// The street the settled form decomposes to is NORTH with a suffix of PARK,
+// not a name of NORTH PARK. go-projectusat a4da5b1 stopped charging a name
+// that is nothing but a placed directional, because the standard's NORTH AVE
+// is a directional street name (p.17), and PARK is a Pub 28 suffix, so
+// NORTH PARK is read the way NORTH AVE is. That is a decomposition, not a
+// hash: all four rows here and the line-broken form all normalize to
+// 123 NORTH PARK / ST PAUL MN either way. It is this branch that makes them
+// agree — before it the line-broken form already read NORTH + PARK while the
+// one-line form read NORTH PARK. Which decomposition is right cannot be had
+// from the string; #24 leaves it to the street window in #17 step 7.
 func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
 	withData := parse.New(parse.Options{UseReferenceData: true})
 
@@ -416,7 +427,7 @@ func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
 		in                      string
 		pre, name, suffix, city string
 	}{
-		{"nothing marks the split, so the data does", "123 NORTH PARK ST PAUL MN", "", "NORTH PARK", "", "ST PAUL"},
+		{"nothing marks the split, so the data does", "123 NORTH PARK ST PAUL MN", "", "NORTH", "PARK", "ST PAUL"},
 		{"a spelled out suffix cannot be SAINT", "123 NORTH PARK STREET, PAUL, MN", "N", "PARK", "ST", "PAUL"},
 		{"a line break marks the split itself", "123 NORTH PARK ST\nPAUL, MN", "N", "PARK", "ST", "PAUL"},
 		{"Paul is a real place in Idaho", "123 NORTH PARK ST, PAUL, ID", "N", "PARK", "ST", "PAUL"},
