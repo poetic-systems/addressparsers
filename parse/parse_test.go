@@ -2,6 +2,7 @@ package parse_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -396,6 +397,40 @@ func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
 	}
 	if a.City != "WEST PALM BEACH" && a.City != "PALM BEACH" {
 		t.Errorf("City = %q, want WEST PALM BEACH or PALM BEACH", a.City)
+	}
+}
+
+// The ambiguity 123 NORTH PARK ST PAUL MN carries is twin: PARK is a street
+// name and a street suffix, and ST is STREET and SAINT, so NORTH PARK in
+// ST PAUL and NORTH PARK ST in PAUL are both grammatical readings of the same
+// tokens (amadsen on #19). Asking the state settles the unmarked form towards
+// ST PAUL, since Minnesota has never had a place called PAUL — but it settles
+// only the form nothing else marks. Spelling the suffix out, breaking the
+// line, or naming a state the city is real in each still reaches the other
+// reading, so the data narrows the ambiguity rather than deciding it.
+func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	for _, tc := range []struct {
+		why                     string
+		in                      string
+		pre, name, suffix, city string
+	}{
+		{"nothing marks the split, so the data does", "123 NORTH PARK ST PAUL MN", "", "NORTH PARK", "", "ST PAUL"},
+		{"a spelled out suffix cannot be SAINT", "123 NORTH PARK STREET, PAUL, MN", "N", "PARK", "ST", "PAUL"},
+		{"a line break marks the split itself", "123 NORTH PARK ST\nPAUL, MN", "N", "PARK", "ST", "PAUL"},
+		{"Paul is a real place in Idaho", "123 NORTH PARK ST, PAUL, ID", "N", "PARK", "ST", "PAUL"},
+	} {
+		a, err := withData.Parse(tc.in)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.in, err)
+			continue
+		}
+		got := []string{a.Predirectional, a.StreetName, a.StreetSuffix, a.City}
+		want := []string{tc.pre, tc.name, tc.suffix, tc.city}
+		if !slices.Equal(got, want) {
+			t.Errorf("Parse(%q) — %s\n got  pre/name/suffix/city = %q\n want                   = %q", tc.in, tc.why, got, want)
+		}
 	}
 }
 
