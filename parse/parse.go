@@ -25,6 +25,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/military"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/puertorico"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ruralroute"
 	"github.com/PortobelloAuth/go-projectusat/pkg/country"
 	"github.com/PortobelloAuth/go-projectusat/pkg/directionals"
@@ -53,6 +54,7 @@ var vocabularies = []func([]token.Token) []claim.Claim{
 	privatemailbox.Claims,
 	highways.Claims,
 	pobox.Claims,
+	puertorico.Claims,
 	military.Claims,
 	ruralroute.Claims,
 	generaldelivery.Claims,
@@ -67,12 +69,14 @@ var vocabularies = []func([]token.Token) []claim.Claim{
 // office box a post office box and not a street named PO BOX: catchall means
 // lowest precedence where a closed form also reads the tokens.
 //
-// puertorico is absent because it has no Candidates function yet
-// (go-projectusat #60). That is a gap in coverage, not a defect here: a missing
-// address type produces no candidate, which is exactly how a type declines to
-// read an address it does not fit.
+// puertorico reads the Spanish street line, and offers a reading only where
+// the last line puts the address in Puerto Rico. It needs no ranking against
+// the others for that reason: a mainland address never sees it, and a Puerto
+// Rico address sees it alongside whatever ordinarystreet made of the same
+// tokens.
 var addressTypes = []func([]token.Token, []claim.Claim, lastline.LineClaim) []*address.CandidateAddress{
 	pobox.Candidates,
+	puertorico.Candidates,
 	military.Candidates,
 	ruralroute.Candidates,
 	generaldelivery.Candidates,
