@@ -1,5 +1,5 @@
-github.com/PortobelloAuth/go-projectusat v0.0.0-20260923011743-c0e255fa197e h1:hQpJSi+XEao7ExGMKG21LU8rJnZiPB0SKFyw9DG/1is=
-github.com/PortobelloAuth/go-projectusat v0.0.0-20260923011743-c0e255fa197e/go.mod h1:7kAakIr4kDtORlmZlw73cJDcg3Eb0x5Pvqj4dDRy9xI=
+github.com/PortobelloAuth/go-projectusat v0.0.0-20260923031840-2a077314b210 h1:H7wY+ZnPFg2DrJTsuSVyRdKRPsrf9VAdWi5n99MWT5I=
+github.com/PortobelloAuth/go-projectusat v0.0.0-20260923031840-2a077314b210/go.mod h1:e2ufG2hlw88/VJGkOZY3xnpzVbJYqzJZ6k2Kk46osxM=
 github.com/anyascii/go v0.3.3 h1:A3BhW92hXPYPb8Y1+zLOip8xjSxNcdl1FaxzTmFxrhs=
 github.com/anyascii/go v0.3.3/go.mod h1:HDvbMmSpqJyIe+xtSkHmAYTjc8PzvO3l1Jmgx/IFUPs=
 github.com/bits-and-blooms/bitset v1.24.2/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
@@ -9,8 +9,8 @@ github.com/bits-and-blooms/bloom/v3 v3.7.1 h1:WXovk4TRKZttAMJfoQx6K2DM0zNIt8w+c6
 github.com/bits-and-blooms/bloom/v3 v3.7.1/go.mod h1:rZzYLLje2dfzXfAkJNxQQHsKurAyK55KUnL43Euk0hU=
 github.com/hbollon/go-edlib v1.7.0 h1:Jt3AtZ+AdgtJhzkrCFvkbdbNL3KCqZlGioLnUfwsxeU=
 github.com/hbollon/go-edlib v1.7.0/go.mod h1:wnt6o6EIVEzUfgbUZY7BerzQ2uvzp354qmS2xaLkrhM=
-github.com/poetic-systems/addresstables v0.0.0-20260916210329-942fea7be238 h1:bLwXpKWUepXLkFZAoULe+Omb61+GLMtScz15pGQosvw=
-github.com/poetic-systems/addresstables v0.0.0-20260916210329-942fea7be238/go.mod h1:0+0MslI2VD30//JsNgvjPLz04GiV6YEsFE2pni512Fs=
+github.com/poetic-systems/addresstables v0.0.0-20260923030434-3eebae0982b0 h1:MiCJ66PJAC3HwCwahWGyf3nnNJAmihvs1e0lY+QFwB8=
+github.com/poetic-systems/addresstables v0.0.0-20260923030434-3eebae0982b0/go.mod h1:0+0MslI2VD30//JsNgvjPLz04GiV6YEsFE2pni512Fs=
 github.com/poetic-systems/zipcity v0.0.0-20260922170358-9d0ac0f7fda7 h1:mTLP+YpC3nAUI9avrVcqwrQ9MwjpazCaxEGArJCD54s=
 github.com/poetic-systems/zipcity v0.0.0-20260922170358-9d0ac0f7fda7/go.mod h1:CxsP4IOba5wQOLxwOTxp4m8uLbv4VuIoT9enmb7i00U=
 github.com/twmb/murmur3 v1.1.8 h1:8Yt9taO/WN3l08xErzjeschgZU2QSrwm1kclYq+0aRg=

@@ -3,7 +3,7 @@ module github.com/poetic-systems/addressparsers
 go 1.25.0
 
 require (
-	github.com/PortobelloAuth/go-projectusat v0.0.0-20260923011743-c0e255fa197e
+	github.com/PortobelloAuth/go-projectusat v0.0.0-20260923031840-2a077314b210
 	github.com/poetic-systems/zipcity v0.0.0-20260922170358-9d0ac0f7fda7
 )
 
@@ -12,6 +12,6 @@ require (
 	github.com/bits-and-blooms/bitset v1.25.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.7.1 // indirect
 	github.com/hbollon/go-edlib v1.7.0 // indirect
-	github.com/poetic-systems/addresstables v0.0.0-20260916210329-942fea7be238 // indirect
+	github.com/poetic-systems/addresstables v0.0.0-20260923030434-3eebae0982b0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 )
