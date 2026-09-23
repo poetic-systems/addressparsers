@@ -125,11 +125,14 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 		claims = append(claims, vocabulary(tokens)...)
 	}
 
-	// Every last line reading is carried forward rather than the best one
-	// chosen here. A weaker last line can still be the one the winning address
-	// type reads, and picking early would hide that reading from the choice.
+	// Every last line reading the data leaves standing is carried forward
+	// rather than the best one chosen here. A weaker last line can still be
+	// the one the winning address type reads, and picking on the grammar alone
+	// would hide that reading from the choice — which is why what narrows the
+	// set is the data and nothing else. See lastLines.
+	r := reference{}
 	var candidates []*address.CandidateAddress
-	for _, line := range lastline.LineClaims(tokens, claims) {
+	for _, line := range p.lastLines(r, tokens, claims) {
 		for _, addressType := range addressTypes {
 			candidates = append(candidates, addressType(tokens, claims, line)...)
 		}
@@ -138,17 +141,83 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 		return nil, ErrNoReading
 	}
 
-	best := p.choose(candidates)
+	best := p.choose(r, candidates)
 	if best == nil {
 		return nil, ErrNoReading
 	}
 	return best.Address, nil
 }
 
+// lastLines is the readings of the last line the data leaves standing.
+//
+// lastline offers every reading the grammar supports, and where an address
+// writes no comma that is most of the tokens ahead of the region: 123 NORTH
+// PARK ST, PAUL, MN 55102 is offered with PAUL for its city, with ST PAUL,
+// with PARK ST PAUL, and with no city at all. The grammar cannot narrow that
+// and does not try. The data can, and this is the only place it can do it
+// before the street question is asked — see #17 step 2, and go-projectusat#61
+// for why asking afterwards is too late.
+//
+// So: when the data confirms any reading's city, the readings it does not
+// confirm fall away, and when it confirms none they all stand and the grammar
+// decides. That is the promotion rule from #17 — a window the data has seen
+// beats one it has not, and where it has seen none nothing is discarded — and
+// it is why a real city the Census missed still parses.
+//
+// Nothing about a surviving reading is rewritten. Confidence in particular is
+// left exactly as lastline wrote it, so the comma in 123 MAIN ST WEST, PALM
+// BEACH, FL still separates PALM BEACH from WEST PALM BEACH when the data has
+// seen both: corroborating a reading the data likes would lift the unmarked
+// one to the marked one's confidence and erase the only thing telling the pair
+// apart. Measured; it is not a hypothetical.
+func (p *Parser) lastLines(r reference, tokens []token.Token, claims []claim.Claim) []lastline.LineClaim {
+	lines := lastline.LineClaims(tokens, claims)
+	if !p.opts.UseReferenceData {
+		return lines
+	}
+
+	var confirmed []lastline.LineClaim
+	for _, line := range lines {
+		ans, ok := cityAgreement(r, linePart(line, claim.PartPostal), linePart(line, claim.PartCity), linePart(line, claim.PartRegion))
+		if ok && ans == agrees {
+			confirmed = append(confirmed, line)
+		}
+	}
+	if len(confirmed) == 0 {
+		return lines
+	}
+	return confirmed
+}
+
+// linePart reports what a last line reading says a part is, or "" when the
+// reading does not claim that part at all — a {Region} {Postal Code} reading
+// has no city, and that is a reading rather than a gap.
+func linePart(line lastline.LineClaim, part claim.Part) string {
+	for _, p := range line.Claim.Parts {
+		if p.Part == part {
+			return p.Value
+		}
+	}
+	return ""
+}
+
+// cityAgreement asks the strongest city question the fields support: whether
+// the ZIP Code and the city pair, or — when there is no ZIP Code to pair the
+// city with — whether the state has that city at all. A city known for this
+// ZIP Code is stronger evidence than a city known somewhere in the state, so
+// the second is asked only when the first cannot be.
+func cityAgreement(r reference, postal, city, region string) (agreement, bool) {
+	if ans, ok := zipCityAgreement(r, postal, city); ok {
+		return ans, true
+	}
+	return cityZipsAgreement(r, postal, city, region)
+}
+
 // choose ranks candidates and returns the best, or nil when none survive.
 //
-// The score decides, and coverage breaks ties: between two equally scored
-// readings the one stranding fewer tokens is the better account of the input.
+// The score decides, coverage breaks ties — between two equally scored
+// readings the one stranding fewer tokens is the better account of the input
+// — and the street's own grammar breaks what is left, see streetConfidence.
 // The score is this package's own integer — the grammar's rung (see rung)
 // plus one for every question reference data agrees with and minus one for
 // every question it contradicts, uncapped in either direction — see score.
@@ -164,15 +233,15 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 // line can differ only in which field holds a word — PENNSYLVANIA AVE as a
 // name against PENNSYLVANIA with AVE as its suffix — and reference data
 // cannot see that: both ask it the same key and get the same answer, so both
-// scores shift by the same amount and the grammar's own gap between them
-// survives the shift unchanged.
-func (p *Parser) choose(candidates []*address.CandidateAddress) *address.CandidateAddress {
+// scores shift by the same amount. The grammar's own gap between them
+// survives the shift, and where the candidate's minimum had already closed
+// that gap it is streetConfidence, below, that reopens it.
+func (p *Parser) choose(r reference, candidates []*address.CandidateAddress) *address.CandidateAddress {
 	type ranked struct {
 		candidate *address.CandidateAddress
 		score     int
 	}
 
-	r := reference{}
 	scored := make([]ranked, 0, len(candidates))
 	for _, c := range candidates {
 		if c == nil || c.Address == nil {
@@ -192,9 +261,67 @@ func (p *Parser) choose(candidates []*address.CandidateAddress) *address.Candida
 		if scored[i].score != scored[j].score {
 			return scored[i].score > scored[j].score
 		}
-		return len(scored[i].candidate.Leftover) < len(scored[j].candidate.Leftover)
+		if a, b := len(scored[i].candidate.Leftover), len(scored[j].candidate.Leftover); a != b {
+			return a < b
+		}
+		return streetConfidence(scored[i].candidate) > streetConfidence(scored[j].candidate)
 	})
 	return scored[0].candidate
+}
+
+// streetConfidence is how strongly the street line alone is held: the minimum
+// over the claims carrying a street field, or the candidate's own confidence
+// where a reading has no street line to hold — a post office box is as
+// strongly held as it already says it is, and this tie-break must not rate it
+// again.
+//
+// It exists because CandidateAddress.Confidence is the minimum over every
+// accepted claim, and the minimum is routinely decided by a claim the tied
+// readings share. 123 OCEAN BOULEVARD WEST PALM BEACH FL is read both as
+// OCEAN BOULEVARD and as OCEAN with the suffix BLVD, and ordinarystreet does
+// rate the second a rung above the first — but the city on that unmarked last
+// line is held one rung lower than either, so both candidates come out at the
+// city's confidence and the grammar's own gap is invisible to the sort. The
+// same minimum flattens 3253 W 9200 S WEST JORDAN UT into a street named
+// W 9200 S.
+//
+// So this is not a second opinion about the address; it is the first one,
+// read off the part the tied readings actually disagree about. It is the last
+// key rather than the second, and both of the keys above it matter: reference
+// data still decides, and coverage still decides, which is what keeps a
+// reading that strands the whole street line from winning on the confidence
+// it is left with by not reading one — measured, two of the standard's own
+// fragments do exactly that when this key is asked first.
+func streetConfidence(c *address.CandidateAddress) claim.Confidence {
+	found := false
+	lowest := claim.ConfidenceExact
+
+	for _, held := range c.Claims {
+		if !holdsStreet(held) {
+			continue
+		}
+		if !found || held.Confidence < lowest {
+			found, lowest = true, held.Confidence
+		}
+	}
+	if !found {
+		return c.Confidence
+	}
+	return lowest
+}
+
+// holdsStreet reports whether a claim carries any of the four fields a street
+// name is made of — the same four streetForQuery renders, and for the same
+// reason: they are the street, and the primary number and secondary unit are
+// what sits on it.
+func holdsStreet(held claim.Claim) bool {
+	for _, part := range held.Parts {
+		switch part.Part {
+		case claim.PartPredirectional, claim.PartStreetName, claim.PartStreetSuffix, claim.PartPostdirectional:
+			return true
+		}
+	}
+	return false
 }
 
 // rung maps a grammar confidence onto this package's own 0..3 scale, in the
@@ -266,8 +393,10 @@ const (
 )
 
 // agreement asks zipcity every question this reading supports and reports
-// each answer, in the order asked: zip+city first, then the street question,
-// folded from up to two zipcity calls into one answer — see streetAgreement.
+// each answer, in the order asked: zip+city first (or city+state, when there
+// is no ZIP Code to pair the city with — see cityZipsAgreement), then the
+// street question, folded from up to two zipcity calls into one answer — see
+// streetAgreement.
 //
 // Every answer is evidence, and none of them are symmetric. zipcity answers
 // from bloom filters built at a 0.005 false positive rate (the rate is set in
@@ -286,7 +415,7 @@ const (
 func (p *Parser) agreement(r reference, a *address.Address) []agreement {
 	var answers []agreement
 
-	if ans, ok := zipCityAgreement(r, a); ok {
+	if ans, ok := cityAgreement(r, a.Postal, a.City, a.Region); ok {
 		answers = append(answers, ans)
 	}
 	if ans, ok := streetAgreement(r, a); ok {
@@ -317,14 +446,48 @@ func (r reference) check(key string, query func() (bool, error)) (bool, error) {
 // than answering, when there is nothing to ask about or zipcity could not be
 // consulted: an address the data cannot speak to is not thereby a better or a
 // worse reading.
-func zipCityAgreement(r reference, a *address.Address) (agreement, bool) {
-	m := zip5.FindStringSubmatch(a.Postal)
-	if m == nil || a.City == "" {
+func zipCityAgreement(r reference, postal, city string) (agreement, bool) {
+	m := zip5.FindStringSubmatch(postal)
+	if m == nil || city == "" {
 		return unknown, false
 	}
 
-	present, err := r.check("zip city "+m[1]+" "+a.City, func() (bool, error) {
-		return zipcity.CheckZipAndCity(m[1], a.City)
+	present, err := r.check("zip city "+m[1]+" "+city, func() (bool, error) {
+		return zipcity.CheckZipAndCity(m[1], city)
+	})
+	if err != nil {
+		return unknown, false
+	}
+	return answerFor(present), true
+}
+
+// cityZipsAgreement asks, for a reading with a city and a two-letter region
+// but no ZIP Code, whether the data has seen that city anywhere in that
+// state: ZipsKnownFor yields a code for it or yields nothing. It is
+// zipCityAgreement's question read the other way, and it is asked only when
+// that one cannot be, since a city known for this ZIP Code is stronger
+// evidence than a city known somewhere in the state.
+//
+// An empty answer is definitive in the sense a false from the zip-city
+// filter is — the name was never seen for any code in the state, in GeoNames
+// or in TIGER — and is charged the same one point, no more: zipcity's own
+// caveat that the list is neither complete nor preferred-first holds, and a
+// real city the data missed still parses. What the point buys is the split
+// nothing else marks: with no ZIP Code and no comma, 123 MAIN ST WEST PALM
+// BEACH FL reads as well with ST WEST PALM BEACH for its city as with WEST
+// PALM BEACH, and only the data knows one of those is a place
+// (addressparsers#17). Which of the city's codes the address belongs to is
+// not asked here; that is the street question's business.
+func cityZipsAgreement(r reference, postal, city, region string) (agreement, bool) {
+	if zip5.MatchString(postal) || city == "" || len(region) != 2 {
+		return unknown, false
+	}
+
+	present, err := r.check("city zips "+region+" "+city, func() (bool, error) {
+		for range zipcity.ZipsKnownFor(region, city) {
+			return true, nil
+		}
+		return false, nil
 	})
 	if err != nil {
 		return unknown, false

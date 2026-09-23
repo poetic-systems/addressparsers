@@ -2,6 +2,7 @@ package parse_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -343,6 +344,167 @@ func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
 	}
 	if ans, ok := parse.StreetAgreement(absent); !ok || ans != parse.Contradicts {
 		t.Errorf("StreetAgreement(absent street) = %v, %v, want Contradicts, true", ans, ok)
+	}
+}
+
+// With no ZIP Code to pair the city with, the city is asked about on its own:
+// has the state ever had a place by that name. It is asked only then — a ZIP
+// Code present means zipCityAgreement's stronger question is the one to ask
+// — and only when there is a two-letter region to ask it of.
+func TestCityZipsAgreementAsksTheStateWhenThereIsNoZip(t *testing.T) {
+	real := &address.Address{City: "WEST PALM BEACH", Region: "FL"}
+	if ans, ok := parse.CityZipsAgreement(real); !ok || ans != parse.Agrees {
+		t.Errorf("CityZipsAgreement(real city) = %v, %v, want Agrees, true", ans, ok)
+	}
+
+	absent := &address.Address{City: "ST WEST PALM BEACH", Region: "FL"}
+	if ans, ok := parse.CityZipsAgreement(absent); !ok || ans != parse.Contradicts {
+		t.Errorf("CityZipsAgreement(absent city) = %v, %v, want Contradicts, true", ans, ok)
+	}
+
+	for name, a := range map[string]*address.Address{
+		"with a ZIP":     {City: "WEST PALM BEACH", Region: "FL", Postal: "33401"},
+		"without region": {City: "WEST PALM BEACH"},
+		"without city":   {Region: "FL"},
+	} {
+		if ans, ok := parse.CityZipsAgreement(a); ok {
+			t.Errorf("CityZipsAgreement(%s) = %v, true; want it to decline", name, ans)
+		}
+	}
+}
+
+// Without a ZIP Code or a comma nothing in the grammar says where the street
+// ends and the city begins: 123 NORTH PARK ST PAUL MN reads as well with PARK
+// ST PAUL for its city as with ST PAUL, and lastline offers both. The data
+// knows only one of them is a place in Minnesota, and that is what splits
+// the line (addressparsers#17). The same holds for ST WEST PALM BEACH against
+// the two real places behind it — which of those two is not the data's
+// call here, since both are real.
+func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	a, err := withData.Parse("123 NORTH PARK ST PAUL MN")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if a.City != "ST PAUL" {
+		t.Errorf("City = %q, want ST PAUL", a.City)
+	}
+
+	a, err = withData.Parse("123 MAIN ST WEST PALM BEACH FL")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if a.City != "WEST PALM BEACH" && a.City != "PALM BEACH" {
+		t.Errorf("City = %q, want WEST PALM BEACH or PALM BEACH", a.City)
+	}
+}
+
+// The ambiguity 123 NORTH PARK ST PAUL MN carries is twin: PARK is a street
+// name and a street suffix, and ST is STREET and SAINT, so NORTH PARK in
+// ST PAUL and NORTH PARK ST in PAUL are both grammatical readings of the same
+// tokens (amadsen on #19). Asking the state settles the unmarked form towards
+// ST PAUL, since Minnesota has never had a place called PAUL — but it settles
+// only the form nothing else marks. Spelling the suffix out, breaking the
+// line, or naming a state the city is real in each still reaches the other
+// reading, so the data narrows the ambiguity rather than deciding it.
+//
+// The street the settled form decomposes to is NORTH with a suffix of PARK,
+// not a name of NORTH PARK. go-projectusat a4da5b1 stopped charging a name
+// that is nothing but a placed directional, because the standard's NORTH AVE
+// is a directional street name (p.17), and PARK is a Pub 28 suffix, so
+// NORTH PARK is read the way NORTH AVE is. That is a decomposition, not a
+// hash: all four rows here and the line-broken form all normalize to
+// 123 NORTH PARK / ST PAUL MN either way. It is this branch that makes them
+// agree — before it the line-broken form already read NORTH + PARK while the
+// one-line form read NORTH PARK. Which decomposition is right cannot be had
+// from the string; #24 leaves it to the street window in #17 step 7.
+func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	for _, tc := range []struct {
+		why                     string
+		in                      string
+		pre, name, suffix, city string
+	}{
+		{"nothing marks the split, so the data does", "123 NORTH PARK ST PAUL MN", "", "NORTH", "PARK", "ST PAUL"},
+		{"a spelled out suffix cannot be SAINT", "123 NORTH PARK STREET, PAUL, MN", "N", "PARK", "ST", "PAUL"},
+		{"a line break marks the split itself", "123 NORTH PARK ST\nPAUL, MN", "N", "PARK", "ST", "PAUL"},
+		{"Paul is a real place in Idaho", "123 NORTH PARK ST, PAUL, ID", "N", "PARK", "ST", "PAUL"},
+	} {
+		a, err := withData.Parse(tc.in)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tc.in, err)
+			continue
+		}
+		got := []string{a.Predirectional, a.StreetName, a.StreetSuffix, a.City}
+		want := []string{tc.pre, tc.name, tc.suffix, tc.city}
+		if !slices.Equal(got, want) {
+			t.Errorf("Parse(%q) — %s\n got  pre/name/suffix/city = %q\n want                   = %q", tc.in, tc.why, got, want)
+		}
+	}
+}
+
+// Intake data is not consistent about commas, and a comma must not change the
+// hash (#20). It used to: with the comma the last line is marked and the
+// street reading ordinarystreet rates highest wins, and without it the city
+// claim comes in a rung lower and CandidateAddress.Confidence — the minimum
+// over the accepted claims — flattens every reading of the street line to the
+// city's own confidence, so enumeration order picked the street instead.
+func TestACommaDoesNotChangeTheStreet(t *testing.T) {
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	for _, marked := range []string{
+		"123 OCEAN BOULEVARD, WEST PALM BEACH, FL",
+		"123 MAIN STREET, WEST PALM BEACH, FL",
+		"3253 W 9200 S, WEST JORDAN, UT",
+		"123 NORTH PARK ST, ST PAUL, MN",
+	} {
+		unmarked := strings.ReplaceAll(marked, ",", "")
+
+		a, err := withData.Parse(marked)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", marked, err)
+			continue
+		}
+		b, err := withData.Parse(unmarked)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", unmarked, err)
+			continue
+		}
+
+		got := []string{b.Predirectional, b.StreetName, b.StreetSuffix, b.Postdirectional, b.City}
+		want := []string{a.Predirectional, a.StreetName, a.StreetSuffix, a.Postdirectional, a.City}
+		if !slices.Equal(got, want) {
+			t.Errorf("Parse(%q)\n got  pre/name/suffix/post/city = %q\n want (from %q)            = %q", unmarked, got, marked, want)
+		}
+	}
+}
+
+// StreetConfidence reads the street line's own rating off the claims the
+// reading accepted, which is what the candidate's minimum destroyed. A
+// reading with no street line has nothing to rate and reports what it is
+// already held at, so that this tie-break neither lifts a post office box
+// above a street nor drops it below one.
+func TestStreetConfidenceReadsTheStreetAndNothingElse(t *testing.T) {
+	street := &address.CandidateAddress{
+		Confidence: claim.ConfidenceLikely,
+		Claims: []claim.Claim{
+			{Confidence: claim.ConfidenceExact, Parts: []claim.ClaimPart{{Part: claim.PartStreetName}}},
+			{Confidence: claim.ConfidenceStrong, Parts: []claim.ClaimPart{{Part: claim.PartStreetSuffix}}},
+			{Confidence: claim.ConfidenceWeak, Parts: []claim.ClaimPart{{Part: claim.PartCity}}},
+		},
+	}
+	if got := parse.StreetConfidence(street); got != claim.ConfidenceStrong {
+		t.Errorf("StreetConfidence(street) = %v, want %v — the city must not be counted", got, claim.ConfidenceStrong)
+	}
+
+	box := &address.CandidateAddress{
+		Confidence: claim.ConfidenceExact,
+		Claims:     []claim.Claim{{Confidence: claim.ConfidenceWeak, Parts: []claim.ClaimPart{{Part: claim.PartCity}}}},
+	}
+	if got := parse.StreetConfidence(box); got != claim.ConfidenceExact {
+		t.Errorf("StreetConfidence(no street) = %v, want %v", got, claim.ConfidenceExact)
 	}
 }
 
