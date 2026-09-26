@@ -149,7 +149,50 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 	if best == nil {
 		return nil, ErrNoReading
 	}
+	if firm := firmLine(tokens, best); firm != "" {
+		best.Address.BusinessName = firm
+	}
 	return best.Address, nil
+}
+
+// firmLine reports the topmost physical line as a business name, or "" where
+// none applies.
+//
+// Step 3ii of #17: everything before the last line is address lines, and the
+// topmost of them is the firm. ordinarystreet (and every other address type)
+// reads that topmost line as leftover rather than street, exactly as
+// documented — nothing downstream should try to place tokens a reading left
+// unaccounted for back into that same reading. But a firm name is not part of
+// the reading; it is a fact about the input the reading was never going to
+// carry, which is why Address has its own field for it. So this runs after
+// choose, not inside it: it looks for a leftover run that is the whole first
+// line and nothing more, which is the one shape leftover tokens can take
+// without implicating the reading choose already made.
+//
+// A two line input (street, last line) has nothing above the street to be a
+// firm, so this only fires from three lines up.
+func firmLine(tokens []token.Token, best *address.CandidateAddress) string {
+	if len(tokens) == 0 || tokens[len(tokens)-1].Line < 2 {
+		return ""
+	}
+
+	var topLine int
+	for _, t := range tokens {
+		if t.Line != 0 {
+			break
+		}
+		topLine++
+	}
+	if topLine == 0 {
+		return ""
+	}
+
+	for _, span := range best.Leftover {
+		if span.Start == 0 && span.Length == topLine {
+			return token.Join(tokens[:topLine])
+		}
+	}
+	return ""
 }
 
 // lastLines is the readings of the last line the data leaves standing.
