@@ -577,6 +577,29 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	if a.StreetName == "" {
 		return unknown, false
 	}
+	// Step 4 of #17: where the last line puts the address in Puerto Rico —
+	// UsePRDialect's own test, the same one that gates puertorico.Candidates
+	// — the street question is skipped for this reading too, rather than
+	// asked and scored.
+	//
+	// zipcity's street key is TIGER's Appendix E SHORT form (measured against
+	// go-projectusat/pkg/address/parser/parsertest and TIGER 2025
+	// tl_2025_72127_featnames: "CLL LOIZA" is a key, "CALLE LOIZA" is not),
+	// and diacritics fragment the index further ("CLL LOÍZA" is yet another
+	// key). The spec forbids abbreviating Puerto Rico street names on output
+	// (body p.26), so streetForQuery will always build the long, accented
+	// form here and always get a definitive false back — not because the
+	// street is wrong, but because the key it is asked under can never be
+	// the one TIGER recorded. Scoring that false would not merely fail to
+	// help the ordinarystreet reading; it would count as a strike against
+	// the puertorico reading of the very same tokens, which the type guard
+	// above never lets ask this question at all. So Puerto Rico is not
+	// added to the type guard — that would let ordinarystreet's spurious
+	// contradiction outvote a reading that was never wrong — and instead
+	// neither reading is scored on a key-spelling artifact.
+	if puertorico.UsePRDialect(a.Region, a.Postal) {
+		return unknown, false
+	}
 	street := streetForQuery(a)
 
 	m := zip5.FindStringSubmatch(a.Postal)

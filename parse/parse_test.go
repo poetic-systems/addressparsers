@@ -11,6 +11,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/puertorico"
 	"github.com/poetic-systems/addressparsers/parse"
 )
 
@@ -104,6 +105,37 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 				t.Errorf("street line = %q, want %q", got, c.street)
 			}
 		})
+	}
+}
+
+// Step 4 of #17: a Puerto Rico street line must read the same way with
+// reference data on or off. Before this fix, turning reference data on
+// flipped this address from *puertorico.PuertoRicoAddress to
+// *ordinarystreet.OrdinaryStreetAddress — not because the ordinarystreet
+// reading earned the point honestly, but because streetAgreement's type
+// guard let it ask a street question the puertorico reading of the same
+// tokens was never asked, and zipcity was guaranteed to answer false to the
+// long, accented form the spec requires on output. See streetAgreement.
+func TestReferenceDataDoesNotAdjudicateAPuertoRicoStreetLine(t *testing.T) {
+	source := "A17 CALLE 1\nSAN JUAN PR"
+
+	without := parse.New(parse.Options{})
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	a1, err := without.Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	a2, err := withData.Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+
+	if _, ok := a1.Type.(*puertorico.PuertoRicoAddress); !ok {
+		t.Fatalf("without reference data: want *puertorico.PuertoRicoAddress, got %T", a1.Type)
+	}
+	if _, ok := a2.Type.(*puertorico.PuertoRicoAddress); !ok {
+		t.Fatalf("with reference data: want *puertorico.PuertoRicoAddress, got %T", a2.Type)
 	}
 }
 
@@ -538,6 +570,27 @@ func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
 
 	if _, ok := parse.StreetAgreement(a); ok {
 		t.Error("want the question declined with no street name")
+	}
+}
+
+// Step 4 of #17: zipcity's street key is TIGER's Appendix E SHORT form
+// ("CLL 1" is a key, "CALLE 1" is not) and the spec forbids abbreviating a
+// Puerto Rico street name on output, so an ordinarystreet reading of a Puerto
+// Rico last line can never earn an honest street answer — see
+// streetAgreement's comment. StreetAgreement must decline for it exactly as
+// it declines for the closed forms above, rather than manufacture a
+// contradiction that the puertorico reading of the same tokens was never
+// asked about.
+func TestStreetAgreementDeclinesForPuertoRico(t *testing.T) {
+	a := &address.Address{
+		Type:       &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName: "CALLE 1",
+		City:       "SAN JUAN",
+		Region:     "PR",
+	}
+
+	if _, ok := parse.StreetAgreement(a); ok {
+		t.Error("want the question declined for a Puerto Rico last line")
 	}
 }
 
