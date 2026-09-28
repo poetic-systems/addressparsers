@@ -327,7 +327,7 @@ func TestReferenceDoesNotCacheAnError(t *testing.T) {
 }
 
 // A candidate with a ZIP, a city, and a two-letter region asks both
-// CheckZipAndStreet and CheckCityStateAndStreet and folds the two answers —
+// MatchZipAndStreet and MatchCityStateAndStreet and folds the two answers —
 // see foldStreetAnswers. W 9200 S is real in zipcity's West Jordan data on
 // both shards (verified by probe), so the fold lands on Agrees.
 func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
@@ -350,7 +350,7 @@ func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
 	}
 }
 
-// A candidate with no ZIP falls back to CheckCityStateAndStreet rather than
+// A candidate with no ZIP falls back to MatchCityStateAndStreet rather than
 // asking nothing — the choice CONTRIBUTING calls out as worth deciding
 // explicitly. Pleasant Hill Rd is real in zipcity's Pleasant Hill, CA
 // city-street data (verified by probe); a made up street at the same city and
