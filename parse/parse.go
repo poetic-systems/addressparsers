@@ -93,6 +93,10 @@ var ErrNoReading = fmt.Errorf("parse: no address type offered a reading")
 // zip5 matches the five digit form zipcity requires, narrowing a ZIP+4.
 var zip5 = regexp.MustCompile(`^(\d{5})(?:-?\d{4})?$`)
 
+// bareZip5 matches a plain five digit ZIP and nothing more — no ZIP+4 add-on
+// already present, and no partial or malformed postal code.
+var bareZip5 = regexp.MustCompile(`^\d{5}$`)
+
 // Options controls how much the parser leans on reference data.
 type Options struct {
 	// UseReferenceData lets zipcity break ties among candidates.
@@ -152,7 +156,32 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 	if firm := firmLine(tokens, best); firm != "" {
 		best.Address.BusinessName = firm
 	}
+	generalDeliveryAddOn(best)
 	return best.Address, nil
+}
+
+// generalDeliveryAddOn appends the standard's -9999 add-on to a general
+// delivery reading's bare ZIP, in place.
+//
+// Step 5 of #17: the standard says every general delivery record SHOULD carry
+// the add-on, and generaldelivery.go declines to supply it on purpose —
+// "Both belong to the last line, which this address type takes as read." So
+// it is ours to add, the same way firmLine is: a fact about the input the
+// reading was never going to carry, applied after choose rather than inside
+// it.
+//
+// Only a bare five digit ZIP gets the add-on. An existing ZIP+4 already says
+// what it says and is left alone, and an address with no ZIP at all stays
+// ZIP-less — this fills in what a reading already has, it does not invent a
+// ZIP the input never supplied.
+func generalDeliveryAddOn(best *address.CandidateAddress) {
+	if _, ok := best.Address.Type.(*generaldelivery.GeneralDeliveryAddress); !ok {
+		return
+	}
+	if !bareZip5.MatchString(best.Address.Postal) {
+		return
+	}
+	best.Address.Postal += "-9999"
 }
 
 // firmLine reports the topmost physical line as a business name, or "" where

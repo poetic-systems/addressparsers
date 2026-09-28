@@ -9,6 +9,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/address"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser"
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/generaldelivery"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
 	"github.com/poetic-systems/addressparsers/parse"
@@ -102,6 +103,50 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 			}
 			if got := a.FormatStreetLine(); got != c.street {
 				t.Errorf("street line = %q, want %q", got, c.street)
+			}
+		})
+	}
+}
+
+// Step 5 of #17: the standard's -9999 add-on for general delivery, which
+// upstream deliberately declines to supply (see generaldelivery.go), is this
+// package's to add — but only by filling in a bare ZIP, never by guessing
+// one the input never gave.
+func TestGeneralDeliveryGetsThe9999AddOn(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		postal string
+	}{
+		{
+			name:   "bare five digit ZIP gets the add-on",
+			source: "GENERAL DELIVERY\nTAMPA FL 33602",
+			postal: "33602-9999",
+		},
+		{
+			name:   "an existing ZIP+4 is left alone",
+			source: "GENERAL DELIVERY\nTAMPA FL 33602-1234",
+			postal: "33602-1234",
+		},
+		{
+			name:   "no ZIP at all stays ZIP-less",
+			source: "GENERAL DELIVERY\nTAMPA FL",
+			postal: "",
+		},
+	}
+
+	p := parse.New(parse.Options{})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := p.Parse(c.source)
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			if _, ok := a.Type.(*generaldelivery.GeneralDeliveryAddress); !ok {
+				t.Fatalf("want a general delivery reading, got %T", a.Type)
+			}
+			if a.Postal != c.postal {
+				t.Errorf("postal = %q, want %q", a.Postal, c.postal)
 			}
 		})
 	}
