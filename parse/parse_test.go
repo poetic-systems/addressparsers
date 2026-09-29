@@ -11,6 +11,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/address/parser/claim"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/ordinarystreet"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
+	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/puertorico"
 	"github.com/poetic-systems/addressparsers/parse"
 )
 
@@ -104,6 +105,38 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 				t.Errorf("street line = %q, want %q", got, c.street)
 			}
 		})
+	}
+}
+
+// Step 4 of #17: a Puerto Rico street line must read the same way with
+// reference data on or off. Before this fix, turning reference data on
+// flipped this address from *puertorico.PuertoRicoAddress to
+// *ordinarystreet.OrdinaryStreetAddress — not because the two readings
+// differed in any field (they are identical here, down to the string
+// streetForQuery builds) but because streetAgreement's type guard let only
+// one of them be asked the street question, and zipcity answers CALLE 1 in
+// SAN JUAN PR true. One reading collected the rung, the other was never
+// asked. See streetAgreement.
+func TestReferenceDataDoesNotAdjudicateAPuertoRicoStreetLine(t *testing.T) {
+	source := "A17 CALLE 1\nSAN JUAN PR"
+
+	without := parse.New(parse.Options{})
+	withData := parse.New(parse.Options{UseReferenceData: true})
+
+	a1, err := without.Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	a2, err := withData.Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+
+	if _, ok := a1.Type.(*puertorico.PuertoRicoAddress); !ok {
+		t.Fatalf("without reference data: want *puertorico.PuertoRicoAddress, got %T", a1.Type)
+	}
+	if _, ok := a2.Type.(*puertorico.PuertoRicoAddress); !ok {
+		t.Fatalf("with reference data: want *puertorico.PuertoRicoAddress, got %T", a2.Type)
 	}
 }
 
@@ -538,6 +571,43 @@ func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
 
 	if _, ok := parse.StreetAgreement(a); ok {
 		t.Error("want the question declined with no street name")
+	}
+}
+
+// Step 4 of #17: the puertorico reading's StreetName names a place exactly as
+// the ordinarystreet reading's does, so it must be asked the street question
+// rather than declined. Declining it is what let the ordinarystreet reading of
+// the same tokens collect a rung unopposed — see streetAgreement's comment.
+// CALLE 1 is a real San Juan street in the pinned filter, and the long form is
+// the key, so the honest answer here is agrees for both readings.
+func TestStreetAgreementAnswersForPuertoRico(t *testing.T) {
+	pr := &address.Address{
+		Type:       &puertorico.PuertoRicoAddress{},
+		StreetName: "CALLE 1",
+		City:       "SAN JUAN",
+		Region:     "PR",
+	}
+	ordinary := &address.Address{
+		Type:       &ordinarystreet.OrdinaryStreetAddress{},
+		StreetName: "CALLE 1",
+		City:       "SAN JUAN",
+		Region:     "PR",
+	}
+
+	got, ok := parse.StreetAgreement(pr)
+	if !ok {
+		t.Fatal("want the street question asked of a puertorico reading")
+	}
+	if got != parse.Agrees {
+		t.Errorf("puertorico reading: want %v, got %v", parse.Agrees, got)
+	}
+
+	// The point of asking is that the two readings of one street line get the
+	// same answer, so neither is ranked above the other by a question only one
+	// of them was asked.
+	same, ok := parse.StreetAgreement(ordinary)
+	if !ok || same != got {
+		t.Errorf("ordinarystreet reading of the same street: want (%v, true), got (%v, %v)", got, same, ok)
 	}
 }
 
