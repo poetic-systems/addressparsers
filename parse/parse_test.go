@@ -13,6 +13,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/puertorico"
 	"github.com/poetic-systems/addressparsers/parse"
+	"github.com/poetic-systems/zipcity"
 )
 
 // Every address below is either published in the Project US@ specification or
@@ -696,6 +697,37 @@ func TestFoldStreetAnswers(t *testing.T) {
 		if got := parse.FoldStreetAnswers(tc.zipPresent, tc.cityPresent); got != tc.want {
 			t.Errorf("FoldStreetAnswers(%v, %v) = %v, want %v",
 				tc.zipPresent, tc.cityPresent, got, tc.want)
+		}
+	}
+}
+
+// presentMatch is the Found()-vs-Exact() split, per Aaron's inclination on
+// addressparsers#34: a reading with no directional makes no claim about one,
+// so a variant hit still corroborates it — Found(). A reading that does
+// carry a directional is claiming that one specifically, so a hit under a
+// different directional refutes the claim rather than confirming it — only
+// Exact counts.
+func TestPresentMatchSplitsOnWhetherTheReadingCarriesADirectional(t *testing.T) {
+	exact := zipcity.Match{Exact: true}
+	variant := zipcity.Match{Variants: []string{"N DECATUR RD"}}
+	absent := zipcity.Match{}
+
+	cases := []struct {
+		name           string
+		match          zipcity.Match
+		hasDirectional bool
+		want           bool
+	}{
+		{"exact hit, no directional in reading", exact, false, true},
+		{"exact hit, directional in reading", exact, true, true},
+		{"variant hit, no directional in reading", variant, false, true},
+		{"variant hit, directional in reading", variant, true, false},
+		{"absent, no directional in reading", absent, false, false},
+		{"absent, directional in reading", absent, true, false},
+	}
+	for _, tc := range cases {
+		if got := parse.PresentMatch(tc.match, tc.hasDirectional); got != tc.want {
+			t.Errorf("%s: PresentMatch = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

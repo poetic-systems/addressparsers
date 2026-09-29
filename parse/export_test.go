@@ -53,4 +53,5 @@ var (
 	StreetForQuery    = streetForQuery
 	StreetConfidence  = streetConfidence
 	FoldStreetAnswers = foldStreetAnswers
+	PresentMatch      = presentMatch
 )
