@@ -17,7 +17,7 @@ var (
 // reason: which questions agreement asks, and which single street question a
 // reading qualifies for, is discarded the same way the score is. Testing
 // zipCityAgreement and streetAgreement directly is the only way to pin down
-// that a candidate with no ZIP asks CheckCityStateAndStreet rather than
+// that a candidate with no ZIP asks MatchCityStateAndStreet rather than
 // silently asking nothing, without depending on which reading choose happens
 // to rank first.
 type Agreement = agreement
@@ -53,4 +53,5 @@ var (
 	StreetForQuery    = streetForQuery
 	StreetConfidence  = streetConfidence
 	FoldStreetAnswers = foldStreetAnswers
+	PresentMatch      = presentMatch
 )

@@ -13,6 +13,7 @@ import (
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/pobox"
 	"github.com/PortobelloAuth/go-projectusat/pkg/addresstypes/puertorico"
 	"github.com/poetic-systems/addressparsers/parse"
+	"github.com/poetic-systems/zipcity"
 )
 
 // Every address below is either published in the Project US@ specification or
@@ -327,7 +328,7 @@ func TestReferenceDoesNotCacheAnError(t *testing.T) {
 }
 
 // A candidate with a ZIP, a city, and a two-letter region asks both
-// CheckZipAndStreet and CheckCityStateAndStreet and folds the two answers —
+// MatchZipAndStreet and MatchCityStateAndStreet and folds the two answers —
 // see foldStreetAnswers. W 9200 S is real in zipcity's West Jordan data on
 // both shards (verified by probe), so the fold lands on Agrees.
 func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
@@ -350,7 +351,7 @@ func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
 	}
 }
 
-// A candidate with no ZIP falls back to CheckCityStateAndStreet rather than
+// A candidate with no ZIP falls back to MatchCityStateAndStreet rather than
 // asking nothing — the choice CONTRIBUTING calls out as worth deciding
 // explicitly. Pleasant Hill Rd is real in zipcity's Pleasant Hill, CA
 // city-street data (verified by probe); a made up street at the same city and
@@ -696,6 +697,37 @@ func TestFoldStreetAnswers(t *testing.T) {
 		if got := parse.FoldStreetAnswers(tc.zipPresent, tc.cityPresent); got != tc.want {
 			t.Errorf("FoldStreetAnswers(%v, %v) = %v, want %v",
 				tc.zipPresent, tc.cityPresent, got, tc.want)
+		}
+	}
+}
+
+// presentMatch is the Found()-vs-Exact() split, per Aaron's inclination on
+// addressparsers#34: a reading with no directional makes no claim about one,
+// so a variant hit still corroborates it — Found(). A reading that does
+// carry a directional is claiming that one specifically, so a hit under a
+// different directional refutes the claim rather than confirming it — only
+// Exact counts.
+func TestPresentMatchSplitsOnWhetherTheReadingCarriesADirectional(t *testing.T) {
+	exact := zipcity.Match{Exact: true}
+	variant := zipcity.Match{Variants: []string{"N DECATUR RD"}}
+	absent := zipcity.Match{}
+
+	cases := []struct {
+		name           string
+		match          zipcity.Match
+		hasDirectional bool
+		want           bool
+	}{
+		{"exact hit, no directional in reading", exact, false, true},
+		{"exact hit, directional in reading", exact, true, true},
+		{"variant hit, no directional in reading", variant, false, true},
+		{"variant hit, directional in reading", variant, true, false},
+		{"absent, no directional in reading", absent, false, false},
+		{"absent, directional in reading", absent, true, false},
+	}
+	for _, tc := range cases {
+		if got := parse.PresentMatch(tc.match, tc.hasDirectional); got != tc.want {
+			t.Errorf("%s: PresentMatch = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

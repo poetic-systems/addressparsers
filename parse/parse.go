@@ -580,7 +580,7 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // key. A Puerto Rico street is answerable like any other and there is nothing
 // here to suppress.
 //
-// CheckZipAndStreet and CheckCityStateAndStreet are different filters over
+// MatchZipAndStreet and MatchCityStateAndStreet are different filters over
 // different keys — one shard scoped by ZIP, the other by city and state —
 // so their false positives are independent: about 0.005^2 for both to be
 // spurious, against 0.005 for either alone. On the truth side the two are
@@ -593,9 +593,14 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // has a ZIP, a city, and a two-letter region, and asks whichever one it can
 // when it has only one of those — see foldStreetAnswers for the fold.
 //
-// (MatchZipAndStreet's directional-variant sweep is a different kind of
-// asking twice — several spellings of one street rather than two shards of
-// one spelling — and is still deliberately unused here; see streetForQuery.)
+// Each call folds a match into present/absent through presentMatch: an exact
+// hit or a directional-variant hit (DECATUR RD found under N DECATUR RD) both
+// count as present when the reading itself carries no directional, per Aaron
+// on addressparsers#6. But when the reading does carry one, only an exact hit
+// counts — a variant hit there means TIGER's directional disagrees with the
+// input's, which is a refutation, not corroboration, of the reading's claim.
+// The two-shard fold above still applies on top of that; only what counts as
+// "present" in one shard changed.
 func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	switch a.Type.(type) {
 	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
@@ -606,6 +611,7 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 		return unknown, false
 	}
 	street := streetForQuery(a)
+	hasDirectional := a.Predirectional != "" || a.Postdirectional != ""
 
 	m := zip5.FindStringSubmatch(a.Postal)
 	hasZip := m != nil
@@ -617,7 +623,8 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	var inZip, inCity bool
 	if hasZip {
 		present, err := r.check("zip street "+m[1]+" "+street, func() (bool, error) {
-			return zipcity.CheckZipAndStreet(m[1], street)
+			match, err := zipcity.MatchZipAndStreet(m[1], street)
+			return presentMatch(match, hasDirectional), err
 		})
 		if err != nil {
 			return unknown, false
@@ -626,7 +633,8 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	}
 	if hasCity {
 		present, err := r.check("city street "+a.City+" "+a.Region+" "+street, func() (bool, error) {
-			return zipcity.CheckCityStateAndStreet(a.City, a.Region, street)
+			match, err := zipcity.MatchCityStateAndStreet(a.City, a.Region, street)
+			return presentMatch(match, hasDirectional), err
 		})
 		if err != nil {
 			return unknown, false
@@ -640,7 +648,19 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	return answerFor(inZip || inCity), true
 }
 
-// foldStreetAnswers combines CheckZipAndStreet's and CheckCityStateAndStreet's
+// presentMatch decides whether a zipcity.Match counts as present. A reading
+// with no directional makes no claim about one, so a variant hit is still
+// corroboration: Found(). A reading that does carry a directional is
+// claiming that specific one, so a hit under a different directional
+// refutes it rather than confirming it — only Exact counts.
+func presentMatch(match zipcity.Match, hasDirectional bool) bool {
+	if hasDirectional {
+		return match.Exact
+	}
+	return match.Found()
+}
+
+// foldStreetAnswers combines MatchZipAndStreet's and MatchCityStateAndStreet's
 // answers into one street agreement: both true is agrees, both false is
 // contradicts, and a split is neither — see streetAgreement and missingInZip
 // / missingInCity for why the split case is recorded rather than resolved.
@@ -661,11 +681,7 @@ func foldStreetAnswers(zipPresent, cityPresent bool) agreement {
 // keyed: predirectional, name, suffix, postdirectional, in Pub 28's order —
 // the same order address.Address.FormatStreetLine uses for these four fields,
 // minus the primary number and the secondary unit, which are not part of a
-// street. No directional variant is tried; MatchZipAndStreet exists for that
-// and is deliberately not used here, because trying several spellings of one
-// street multiplies the chance of a spurious true (see the 13:08Z comment on
-// go-projectusat#71) for the sake of a question agreement already answered
-// honestly once.
+// street.
 //
 // The four fields are normalized before they are joined, because the string
 // that has to be real is the one the caller will hash, not the one the reading
