@@ -111,11 +111,12 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 // Step 4 of #17: a Puerto Rico street line must read the same way with
 // reference data on or off. Before this fix, turning reference data on
 // flipped this address from *puertorico.PuertoRicoAddress to
-// *ordinarystreet.OrdinaryStreetAddress — not because the ordinarystreet
-// reading earned the point honestly, but because streetAgreement's type
-// guard let it ask a street question the puertorico reading of the same
-// tokens was never asked, and zipcity was guaranteed to answer false to the
-// long, accented form the spec requires on output. See streetAgreement.
+// *ordinarystreet.OrdinaryStreetAddress — not because the two readings
+// differed in any field (they are identical here, down to the string
+// streetForQuery builds) but because streetAgreement's type guard let only
+// one of them be asked the street question, and zipcity answers CALLE 1 in
+// SAN JUAN PR true. One reading collected the rung, the other was never
+// asked. See streetAgreement.
 func TestReferenceDataDoesNotAdjudicateAPuertoRicoStreetLine(t *testing.T) {
 	source := "A17 CALLE 1\nSAN JUAN PR"
 
@@ -573,24 +574,40 @@ func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
 	}
 }
 
-// Step 4 of #17: zipcity's street key is TIGER's Appendix E SHORT form
-// ("CLL 1" is a key, "CALLE 1" is not) and the spec forbids abbreviating a
-// Puerto Rico street name on output, so an ordinarystreet reading of a Puerto
-// Rico last line can never earn an honest street answer — see
-// streetAgreement's comment. StreetAgreement must decline for it exactly as
-// it declines for the closed forms above, rather than manufacture a
-// contradiction that the puertorico reading of the same tokens was never
-// asked about.
-func TestStreetAgreementDeclinesForPuertoRico(t *testing.T) {
-	a := &address.Address{
+// Step 4 of #17: the puertorico reading's StreetName names a place exactly as
+// the ordinarystreet reading's does, so it must be asked the street question
+// rather than declined. Declining it is what let the ordinarystreet reading of
+// the same tokens collect a rung unopposed — see streetAgreement's comment.
+// CALLE 1 is a real San Juan street in the pinned filter, and the long form is
+// the key, so the honest answer here is agrees for both readings.
+func TestStreetAgreementAnswersForPuertoRico(t *testing.T) {
+	pr := &address.Address{
+		Type:       &puertorico.PuertoRicoAddress{},
+		StreetName: "CALLE 1",
+		City:       "SAN JUAN",
+		Region:     "PR",
+	}
+	ordinary := &address.Address{
 		Type:       &ordinarystreet.OrdinaryStreetAddress{},
 		StreetName: "CALLE 1",
 		City:       "SAN JUAN",
 		Region:     "PR",
 	}
 
-	if _, ok := parse.StreetAgreement(a); ok {
-		t.Error("want the question declined for a Puerto Rico last line")
+	got, ok := parse.StreetAgreement(pr)
+	if !ok {
+		t.Fatal("want the street question asked of a puertorico reading")
+	}
+	if got != parse.Agrees {
+		t.Errorf("puertorico reading: want %v, got %v", parse.Agrees, got)
+	}
+
+	// The point of asking is that the two readings of one street line get the
+	// same answer, so neither is ranked above the other by a question only one
+	// of them was asked.
+	same, ok := parse.StreetAgreement(ordinary)
+	if !ok || same != got {
+		t.Errorf("ordinarystreet reading of the same street: want (%v, true), got (%v, %v)", got, same, ok)
 	}
 }
 

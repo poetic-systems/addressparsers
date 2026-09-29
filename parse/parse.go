@@ -546,13 +546,39 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // — or the two answers, when the reading qualifies for both — into one
 // agreement.
 //
-// Only ordinarystreet offers a reading whose StreetName names a place.
-// pobox, ruralroute, military and generaldelivery each carry a fixed
+// ordinarystreet and puertorico are the two types whose StreetName names a
+// place. pobox, ruralroute, military and generaldelivery each carry a fixed
 // pseudo-name that describes their format rather than a street — "PO BOX",
 // "RR 4", "PSC 3" — and zipcity was never built to answer whether those
 // strings are streets. Asking it would manufacture a contradiction on every
 // closed-form reading rather than evidence about one, so those types are
 // left at zip+city alone.
+//
+// Step 4 of #17 is why puertorico is in that list and not only
+// ordinarystreet. The two address types offer readings of the same tokens, so
+// where one is asked the street question and the other is not, the answer is
+// not evidence about the address — it is a free rung for whichever reading
+// happened to be admitted. A17 CALLE 1 / SAN JUAN PR is the measured case:
+// both readings hold identical Predirectional, StreetName, StreetSuffix and
+// Postdirectional, streetForQuery renders "CALLE 1" for both, and zipcity
+// answers that key true. With only ordinarystreet admitted the two readings
+// tied on the grammar at rung 3 and the one point went to ordinarystreet
+// alone, flipping the reading that reference data off returns. Admitting
+// puertorico puts the same question to both, so the point cancels and the
+// grammar decides — which is the rule the rest of choose already follows:
+// reference data orders readings against each other, it does not get to
+// decide which of them may be asked.
+//
+// An earlier revision of this function did the opposite — skipped the street
+// question entirely when the last line put the address in Puerto Rico — on
+// the belief that zipcity keys only TIGER's Appendix E short form, so the
+// unabbreviated name the spec requires on output could never match. That is
+// false against the pinned filter: CheckCityStateAndStreet("SAN JUAN", "PR",
+// "CALLE 1") and "CALLE LOIZA" both answer true, and it is "CLL 1" / "CLL
+// LOIZA" that answer false. Pub28FeatureName expands featname 156 to CALLE
+// and ApplySpanishPrefixOverrides leaves it alone, so the long form is the
+// key. A Puerto Rico street is answerable like any other and there is nothing
+// here to suppress.
 //
 // CheckZipAndStreet and CheckCityStateAndStreet are different filters over
 // different keys — one shard scoped by ZIP, the other by city and state —
@@ -571,33 +597,12 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // asking twice — several spellings of one street rather than two shards of
 // one spelling — and is still deliberately unused here; see streetForQuery.)
 func streetAgreement(r reference, a *address.Address) (agreement, bool) {
-	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
+	switch a.Type.(type) {
+	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
+	default:
 		return unknown, false
 	}
 	if a.StreetName == "" {
-		return unknown, false
-	}
-	// Step 4 of #17: where the last line puts the address in Puerto Rico —
-	// UsePRDialect's own test, the same one that gates puertorico.Candidates
-	// — the street question is skipped for this reading too, rather than
-	// asked and scored.
-	//
-	// zipcity's street key is TIGER's Appendix E SHORT form (measured against
-	// go-projectusat/pkg/address/parser/parsertest and TIGER 2025
-	// tl_2025_72127_featnames: "CLL LOIZA" is a key, "CALLE LOIZA" is not),
-	// and diacritics fragment the index further ("CLL LOÍZA" is yet another
-	// key). The spec forbids abbreviating Puerto Rico street names on output
-	// (body p.26), so streetForQuery will always build the long, accented
-	// form here and always get a definitive false back — not because the
-	// street is wrong, but because the key it is asked under can never be
-	// the one TIGER recorded. Scoring that false would not merely fail to
-	// help the ordinarystreet reading; it would count as a strike against
-	// the puertorico reading of the very same tokens, which the type guard
-	// above never lets ask this question at all. So Puerto Rico is not
-	// added to the type guard — that would let ordinarystreet's spurious
-	// contradiction outvote a reading that was never wrong — and instead
-	// neither reading is scored on a key-spelling artifact.
-	if puertorico.UsePRDialect(a.Region, a.Postal) {
 		return unknown, false
 	}
 	street := streetForQuery(a)
