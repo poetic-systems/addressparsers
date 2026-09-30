@@ -593,14 +593,24 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // has a ZIP, a city, and a two-letter region, and asks whichever one it can
 // when it has only one of those — see foldStreetAnswers for the fold.
 //
-// Each call folds a match into present/absent through presentMatch: an exact
-// hit or a directional-variant hit (DECATUR RD found under N DECATUR RD) both
-// count as present when the reading itself carries no directional, per Aaron
-// on addressparsers#6. But when the reading does carry one, only an exact hit
-// counts — a variant hit there means TIGER's directional disagrees with the
-// input's, which is a refutation, not corroboration, of the reading's claim.
-// The two-shard fold above still applies on top of that; only what counts as
-// "present" in one shard changed.
+// Each call folds a match into present/absent through presentMatch, which is
+// just Found(): an exact hit or a directional-variant hit (DECATUR RD found
+// under N DECATUR RD) both count as present, regardless of whether the
+// reading itself carries a directional. #34 (addressparsers#6) split on
+// hasDirectional instead, on the belief that a variant hit under a reading
+// that already carries a directional means TIGER's directional disagrees
+// with the input's — a refutation rather than corroboration. #35 found that
+// belief false: directionalVariants (zipcity.go) only ever fills whichever
+// end, front or back, the reading left empty; it never swaps or drops a
+// directional the reading already supplied. So a variant hit can never
+// contradict a directional already present — it can only be evidence the
+// reading is simply missing one, exactly like the no-directional case. The
+// exact-only split also silently starved fully-directional streets (both
+// Predirectional and Postdirectional set) of any corroboration at all, since
+// there both ends are already filled and Variants is always empty — Found()
+// removes that gap along with the false premise. The two-shard fold above
+// still applies on top of this; only what counts as "present" in one shard
+// changed.
 func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	switch a.Type.(type) {
 	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
@@ -611,7 +621,6 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 		return unknown, false
 	}
 	street := streetForQuery(a)
-	hasDirectional := a.Predirectional != "" || a.Postdirectional != ""
 
 	m := zip5.FindStringSubmatch(a.Postal)
 	hasZip := m != nil
@@ -624,7 +633,7 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	if hasZip {
 		present, err := r.check("zip street "+m[1]+" "+street, func() (bool, error) {
 			match, err := zipcity.MatchZipAndStreet(m[1], street)
-			return presentMatch(match, hasDirectional), err
+			return presentMatch(match), err
 		})
 		if err != nil {
 			return unknown, false
@@ -634,7 +643,7 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	if hasCity {
 		present, err := r.check("city street "+a.City+" "+a.Region+" "+street, func() (bool, error) {
 			match, err := zipcity.MatchCityStateAndStreet(a.City, a.Region, street)
-			return presentMatch(match, hasDirectional), err
+			return presentMatch(match), err
 		})
 		if err != nil {
 			return unknown, false
@@ -648,15 +657,14 @@ func streetAgreement(r reference, a *address.Address) (agreement, bool) {
 	return answerFor(inZip || inCity), true
 }
 
-// presentMatch decides whether a zipcity.Match counts as present. A reading
-// with no directional makes no claim about one, so a variant hit is still
-// corroboration: Found(). A reading that does carry a directional is
-// claiming that specific one, so a hit under a different directional
-// refutes it rather than confirming it — only Exact counts.
-func presentMatch(match zipcity.Match, hasDirectional bool) bool {
-	if hasDirectional {
-		return match.Exact
-	}
+// presentMatch decides whether a zipcity.Match counts as present. It is just
+// Found() — an exact hit or a directional-variant hit both count, whether or
+// not the reading already carries a directional. directionalVariants only
+// ever fills the end (front or back) the reading left empty; it never
+// disputes or replaces one already there, so a variant hit is never evidence
+// against a directional the reading supplies — it can only supply one the
+// reading is missing. See addressparsers#35.
+func presentMatch(match zipcity.Match) bool {
 	return match.Found()
 }
 

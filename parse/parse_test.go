@@ -701,32 +701,29 @@ func TestFoldStreetAnswers(t *testing.T) {
 	}
 }
 
-// presentMatch is the Found()-vs-Exact() split, per Aaron's inclination on
-// addressparsers#34: a reading with no directional makes no claim about one,
-// so a variant hit still corroborates it — Found(). A reading that does
-// carry a directional is claiming that one specifically, so a hit under a
-// different directional refutes the claim rather than confirming it — only
-// Exact counts.
-func TestPresentMatchSplitsOnWhetherTheReadingCarriesADirectional(t *testing.T) {
+// presentMatch is just Found(), regardless of whether the reading carries a
+// directional. #34 (addressparsers#6) split on that, reasoning a variant hit
+// under a directional-carrying reading meant TIGER disagreed with the
+// input's directional. #35 found the split rested on a false premise:
+// directionalVariants only ever fills an end the reading left empty, never
+// disputes one already there, so a variant hit is never a refutation —
+// Found() is safe unconditionally.
+func TestPresentMatchIsFound(t *testing.T) {
 	exact := zipcity.Match{Exact: true}
 	variant := zipcity.Match{Variants: []string{"N DECATUR RD"}}
 	absent := zipcity.Match{}
 
 	cases := []struct {
-		name           string
-		match          zipcity.Match
-		hasDirectional bool
-		want           bool
+		name  string
+		match zipcity.Match
+		want  bool
 	}{
-		{"exact hit, no directional in reading", exact, false, true},
-		{"exact hit, directional in reading", exact, true, true},
-		{"variant hit, no directional in reading", variant, false, true},
-		{"variant hit, directional in reading", variant, true, false},
-		{"absent, no directional in reading", absent, false, false},
-		{"absent, directional in reading", absent, true, false},
+		{"exact hit", exact, true},
+		{"variant hit", variant, true},
+		{"absent", absent, false},
 	}
 	for _, tc := range cases {
-		if got := parse.PresentMatch(tc.match, tc.hasDirectional); got != tc.want {
+		if got := parse.PresentMatch(tc.match); got != tc.want {
 			t.Errorf("%s: PresentMatch = %v, want %v", tc.name, got, tc.want)
 		}
 	}
