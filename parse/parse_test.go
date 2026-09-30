@@ -852,3 +852,118 @@ func TestADirectionalStreetNameIsNotTradedForAnAbsorbedReading(t *testing.T) {
 			alphabetic.StreetName, alphabetic.StreetSuffix, alphabetic.Postdirectional)
 	}
 }
+
+// Step 6 of #17: a secondary designator written ahead of the street belongs
+// after it. Publication 28 §213 puts the designator between the street and
+// the city, but intake data writes it first constantly, and the grammar reads
+// a street line left to right — so the whole run becomes one street name and
+// no candidate in the pile holds the right answer. See leadingSecondary.
+func TestALeadingSecondaryDesignatorMovesAfterTheStreet(t *testing.T) {
+	cases := []struct {
+		source string
+		street string
+	}{
+		{"Apartment 3200 152 South Tech Dr\nTAMPA FL 33602", "152 S TECH DR APT 3200"},
+		// #3200 is not a primary number: §213.2 makes # the secondary
+		// designator of unspecified type, so the number ordinarystreet found
+		// is the unit, in the one place the standard does not put it.
+		{"#3200 152 South Tech Dr\nTAMPA FL 33602", "152 S TECH DR # 3200"},
+		{"PMB 456 152 South Tech Dr\nTAMPA FL 33602", "152 S TECH DR PMB 456"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.street, func(t *testing.T) {
+			for _, ref := range []bool{false, true} {
+				a, err := parse.New(parse.Options{UseReferenceData: ref}).Parse(c.source)
+				if err != nil {
+					t.Fatalf("reference data %v: %v", ref, err)
+				}
+				if got := a.FormatStreetLine(); got != c.street {
+					t.Errorf("reference data %v: street line = %q, want %q", ref, got, c.street)
+				}
+			}
+		})
+	}
+}
+
+// The guards are what keep step 6 from firing on an address that means what
+// it says: a reading that already placed a secondary, a closed form that read
+// its own line whole, and a designator word with no number after it — which
+// at the start of a line is far more often a street name.
+func TestALeadingSecondaryLeavesAnAddressThatMeansWhatItSaysAlone(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		street string
+	}{
+		{"already placed", "123 N MAIN ST APT 4\nWEST JORDAN UT 84088", "123 N MAIN ST APT 4"},
+		{"closed form", "PO BOX 11890\nWEST JORDAN UT 84088", "PO BOX 11890"},
+		{"unnumbered designator word", "Key West Ave\nROCKVILLE MD 20850", "AVE KEY WEST"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := parse.New(parse.Options{}).Parse(c.source)
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			if got := a.FormatStreetLine(); got != c.street {
+				t.Errorf("street line = %q, want %q", got, c.street)
+			}
+			if a.BusinessName != "" {
+				t.Errorf("BusinessName = %q, want empty", a.BusinessName)
+			}
+		})
+	}
+}
+
+// Step 7 of #17: with the right edge of the street already fixed, the left
+// edge slides right until the data recognizes what is left. zipcity has
+// N CENTRAL AVE in 33602 and does not have UCENT BUILDING SUITE 480 411
+// N CENTRAL AVE, so the window finds the street, step 6's designator comes
+// out of the middle of it, and what the window slid past lands in
+// BusinessName. See streetWindow.
+func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
+	source := "UCENT Building Suite 480 411 N Central Ave\nTAMPA FL 33602"
+
+	plain, err := parse.New(parse.Options{}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing without reference data: %v", err)
+	}
+	if got := plain.FormatStreetLine(); got != "UCENT BUILDING SUITE 480 411 N CENTRAL AVE" {
+		t.Errorf("without reference data: street line = %q, want the grammar's whole-run reading", got)
+	}
+
+	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with reference data: %v", err)
+	}
+	if got := withData.FormatStreetLine(); got != "411 N CENTRAL AVE STE 480" {
+		t.Errorf("with reference data: street line = %q, want %q", got, "411 N CENTRAL AVE STE 480")
+	}
+	if withData.BusinessName != "UCENT Building" {
+		t.Errorf("BusinessName = %q, want %q", withData.BusinessName, "UCENT Building")
+	}
+}
+
+// The window promotes and never rejects. A street zipcity has never seen is
+// the normal case against TIGER's gaps, and nothing about it may move: the
+// reading with reference data on must be the grammar's own, unslid.
+func TestTheStreetWindowLeavesAStreetTheDataDoesNotKnowWhereItIs(t *testing.T) {
+	for _, source := range []string{
+		"152 South Tech Dr\nTAMPA FL 33602",
+		"Some Firm Name 152 South Tech Dr\nTAMPA FL 33602",
+	} {
+		plain, err := parse.New(parse.Options{}).Parse(source)
+		if err != nil {
+			t.Fatalf("parsing %q without reference data: %v", source, err)
+		}
+		withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+		if err != nil {
+			t.Fatalf("parsing %q with reference data: %v", source, err)
+		}
+		if !plain.Equals(withData) {
+			t.Errorf("reference data moved a street it does not know:\n without = %+v\n with    = %+v", plain, withData)
+		}
+	}
+}
