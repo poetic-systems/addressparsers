@@ -273,11 +273,8 @@ func (p *Parser) streetWindow(tokens []token.Token, best *address.CandidateAddre
 // question so a window is never adopted on a closed form's pseudo-name — see
 // streetAgreement for why "PO BOX" is not a street.
 func recognizable(a *address.Address) bool {
-	switch a.Type.(type) {
-	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
-		return a.StreetName != ""
-	}
-	return false
+	civic, ok := a.Type.(address.DataDependentAddressType)
+	return ok && civic.IsCivicAddressType() && a.StreetName != ""
 }
 
 // leadingSecondary moves a secondary designator written ahead of the street
@@ -312,7 +309,17 @@ func (p *Parser) leadingSecondary(tokens []token.Token, claims []claim.Claim, be
 	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
 		return
 	}
-	if a.SecondaryDesignator != "" || a.Detail != "" {
+	// Detail is excluded here, not folded into the rest.Address.SecondaryDesignator
+	// check below: a leading designator stacked on a reading whose own tail
+	// already claimed Detail (a trailing PMB) is a private-mailbox conflict
+	// this function has no standing to resolve. SecondaryDesignator is not
+	// excluded here on purpose — UNIT 3200 152 TECH DR ROOM 12 reads with no
+	// primary number of its own (the documented symptom) and ROOM 12 already
+	// in SecondaryDesignator, because the whole leading run was swallowed into
+	// StreetName. primaryWithin below is what actually tests for "no primary
+	// number of its own"; this field is the wrong proxy for that and bailing
+	// on it here hid the stacked-designator case entirely.
+	if a.Detail != "" {
 		return
 	}
 
@@ -328,13 +335,27 @@ func (p *Parser) leadingSecondary(tokens []token.Token, claims []claim.Claim, be
 	if rest == nil || rest.Address == nil || rest.Address.StreetName == "" {
 		return
 	}
-	if rest.Address.SecondaryDesignator != "" || rest.Address.Detail != "" {
+	if rest.Address.Detail != "" {
 		return
 	}
 
-	rest.Address.SecondaryDesignator = unit.designator
-	rest.Address.SecondaryNumber = unit.number
-	rest.Address.Detail = unit.detail
+	// The re-read's own tail can already hold a secondary designator of its
+	// own — UNIT 3200 152 TECH DR ROOM 12 re-reads as 152 TECH DR with ROOM
+	// 12 already in SecondaryDesignator/SecondaryNumber. The standard still
+	// has one designator slot, so the leading designator does not displace
+	// it; it folds in ahead of it as a compound SecondaryNumber, the same
+	// shape FormatStreetLine already joins with single spaces. The leading
+	// designator's own word becomes the slot's designator, since it is the
+	// one that sits closest to the street per Publication 28 §213.
+	if rest.Address.SecondaryDesignator != "" {
+		rest.Address.SecondaryNumber = textutil.JoinNonEmpty(" ",
+			unit.number, rest.Address.SecondaryDesignator, rest.Address.SecondaryNumber)
+		rest.Address.SecondaryDesignator = unit.designator
+	} else {
+		rest.Address.SecondaryDesignator = unit.designator
+		rest.Address.SecondaryNumber = unit.number
+		rest.Address.Detail = unit.detail
+	}
 	rest.Address.BusinessName = a.BusinessName
 	*best = *rest
 }
@@ -831,9 +852,7 @@ func cityZipsAgreement(r reference, postal, city, region string) (agreement, boo
 // still applies on top of this; only what counts as "present" in one shard
 // changed.
 func streetAgreement(r reference, a *address.Address) (agreement, bool) {
-	switch a.Type.(type) {
-	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
-	default:
+	if civic, ok := a.Type.(address.DataDependentAddressType); !ok || !civic.IsCivicAddressType() {
 		return unknown, false
 	}
 	if a.StreetName == "" {
