@@ -124,16 +124,47 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 		return nil, ErrNoReading
 	}
 
+	best := p.readLine(tokens)
+	if best == nil {
+		return nil, ErrNoReading
+	}
+	p.streetWindow(tokens, best)
+	return best.Address, nil
+}
+
+// readLine is read with the two layers that rewrite a chosen reading rather
+// than rank it: the firm name above the address, and a secondary designator
+// written ahead of the street. It is separate from read because step 7 asks
+// for a whole reading of a shorter run of tokens, not for a raw candidate.
+func (p *Parser) readLine(tokens []token.Token) *address.CandidateAddress {
+	best, claims := p.read(tokens)
+	if best == nil || best.Address == nil {
+		return nil
+	}
+	if firm := firmLine(tokens, best); firm != "" {
+		best.Address.BusinessName = firm
+	}
+	p.leadingSecondary(tokens, claims, best)
+	return best
+}
+
+// read is Parse with the tokenizing already done: every vocabulary claims, the
+// data narrows the last line, every address type offers its reading, and
+// choose picks. It is a function rather than the body of Parse because step 6
+// re-reads a shorter run of the same tokens — see leadingSecondary — and the
+// thing it needs to re-run is exactly this and not the tokenizer.
+//
+// Every last line reading the data leaves standing is carried forward rather
+// than the best one chosen here. A weaker last line can still be the one the
+// winning address type reads, and picking on the grammar alone would hide that
+// reading from the choice — which is why what narrows the set is the data and
+// nothing else. See lastLines.
+func (p *Parser) read(tokens []token.Token) (*address.CandidateAddress, []claim.Claim) {
 	var claims []claim.Claim
 	for _, vocabulary := range vocabularies {
 		claims = append(claims, vocabulary(tokens)...)
 	}
 
-	// Every last line reading the data leaves standing is carried forward
-	// rather than the best one chosen here. A weaker last line can still be
-	// the one the winning address type reads, and picking on the grammar alone
-	// would hide that reading from the choice — which is why what narrows the
-	// set is the data and nothing else. See lastLines.
 	r := reference{}
 	var candidates []*address.CandidateAddress
 	for _, line := range p.lastLines(r, tokens, claims) {
@@ -142,17 +173,9 @@ func (p *Parser) Parse(source string) (*address.Address, error) {
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, ErrNoReading
+		return nil, claims
 	}
-
-	best := p.choose(r, candidates)
-	if best == nil {
-		return nil, ErrNoReading
-	}
-	if firm := firmLine(tokens, best); firm != "" {
-		best.Address.BusinessName = firm
-	}
-	return best.Address, nil
+	return p.choose(r, candidates), claims
 }
 
 // firmLine reports the topmost physical line as a business name, or "" where
@@ -193,6 +216,202 @@ func firmLine(tokens []token.Token, best *address.CandidateAddress) string {
 		}
 	}
 	return ""
+}
+
+// streetWindow slides the left edge of the street right, one token at a time,
+// and takes the first window the data recognizes, rewriting best in place.
+//
+// Step 7 of #17. The right edge is already fixed — the last line closed it in
+// step 2 and step 6 closed it again at the secondary designator — so the only
+// thing left undecided about the street is where it begins. The grammar
+// anchors that at the first token of the address lines and offers no other
+// reading: every candidate ordinarystreet builds for 411 N CENTRAL AVE
+// preceded by two other words puts those two words inside the street name.
+// Measured; it is the same shape leadingSecondary found and the reason both
+// of these are re-reads rather than tie-breaks.
+//
+// Data promotes and never rejects, which here means three things. It runs
+// only with reference data on. It runs only when the grammar's own reading is
+// not one zipcity recognizes, so a street the data has seen is never slid off
+// in favour of a shorter one it has also seen. And it takes a window only on
+// an agrees — a contradiction, a split answer, or a question zipcity declined
+// all leave the grammar's reading exactly where it was. Where the data has
+// nothing to say, and against the TIGER gaps that are the normal case for a
+// small ZIP Code, nothing here fires at all and the grammar decides.
+//
+// What the window slides past is not discarded. The tokens ahead of the
+// street are the shape firmLine already reads as a firm name, so they land in
+// BusinessName — but only where the reading has not already found one, since
+// a firm on its own line above is the better claim on that field.
+func (p *Parser) streetWindow(tokens []token.Token, best *address.CandidateAddress) {
+	if !p.opts.UseReferenceData || !recognizable(best.Address) {
+		return
+	}
+	r := reference{}
+	if ans, ok := streetAgreement(r, best.Address); ok && ans == agrees {
+		return
+	}
+
+	for start, end := 1, token.LineEnd(tokens, 0); start < end; start++ {
+		window := p.readLine(tokens[start:])
+		if window == nil || !recognizable(window.Address) {
+			continue
+		}
+		if ans, ok := streetAgreement(r, window.Address); !ok || ans != agrees {
+			continue
+		}
+		if window.Address.BusinessName == "" {
+			window.Address.BusinessName = token.Join(tokens[:start])
+		}
+		*best = *window
+		return
+	}
+}
+
+// recognizable reports whether a reading's street names a place zipcity could
+// have seen. It is streetAgreement's own type guard, asked ahead of the
+// question so a window is never adopted on a closed form's pseudo-name — see
+// streetAgreement for why "PO BOX" is not a street.
+func recognizable(a *address.Address) bool {
+	switch a.Type.(type) {
+	case *ordinarystreet.OrdinaryStreetAddress, *puertorico.PuertoRicoAddress:
+		return a.StreetName != ""
+	}
+	return false
+}
+
+// leadingSecondary moves a secondary designator written ahead of the street
+// to where the standard puts it, rewriting best in place.
+//
+// Step 6 of #17: the secondary designator and its details sit between the
+// street and the city, and finding them is what fixes the right edge of the
+// street window step 7 slides. APARTMENT 3200 152 SOUTH TECH DR writes the
+// designator on the wrong side of the number, which Publication 28 §213 does
+// not allow on a standardized record but real intake data does constantly.
+//
+// The grammar cannot recover from it. ordinarystreet reads a street line left
+// to right, so a leading designator is not a designator to it — the whole run
+// becomes one street name, the primary number is never found, and there is no
+// candidate in the pile holding the right answer for choose to pick. Measured:
+// APARTMENT 3200 152 SOUTH TECH DR offers exactly two readings and both keep
+// APARTMENT in the name. So this is a re-read rather than a tie-break, which
+// is why it runs here beside firmLine rather than inside choose.
+//
+// The guards are what keep it from firing on an address that means what it
+// says. Only the catchall type is touched: a post office box, a rural route
+// and the rest have each read their own line whole and there is nothing about
+// them for a designator to be ahead of. Only a reading with no primary number
+// of its own, which is the symptom the leading designator causes. Only a
+// numbered designator — APT 3200, # 3200, PMB 456 — since a bare designator
+// word at the start of a line is far more often a street name (KEY WEST is
+// the vocabulary's own example). And only when the shorter re-read finds a
+// street and claims no secondary of its own, so a designator is never stacked
+// on a reading that already has one.
+func (p *Parser) leadingSecondary(tokens []token.Token, claims []claim.Claim, best *address.CandidateAddress) {
+	a := best.Address
+	if _, ok := a.Type.(*ordinarystreet.OrdinaryStreetAddress); !ok {
+		return
+	}
+	if a.SecondaryDesignator != "" || a.Detail != "" {
+		return
+	}
+
+	unit, width := leadingUnit(claims)
+	if width == 0 || width >= len(tokens) || tokens[width-1].Line != tokens[0].Line {
+		return
+	}
+	if !primaryWithin(best, width) {
+		return
+	}
+
+	rest, _ := p.read(tokens[width:])
+	if rest == nil || rest.Address == nil || rest.Address.StreetName == "" {
+		return
+	}
+	if rest.Address.SecondaryDesignator != "" || rest.Address.Detail != "" {
+		return
+	}
+
+	rest.Address.SecondaryDesignator = unit.designator
+	rest.Address.SecondaryNumber = unit.number
+	rest.Address.Detail = unit.detail
+	rest.Address.BusinessName = a.BusinessName
+	*best = *rest
+}
+
+// primaryWithin reports whether a reading spent nothing outside the leading
+// run on its primary address number — either it found none, or the tokens it
+// found one in are the very tokens the designator wants back.
+//
+// #3200 152 SOUTH TECH DR is why this is a span test and not "has no primary
+// number". ordinarystreet reads #3200 as the primary number and 152 SOUTH
+// TECH DR as the street, which is a complete account of the line and looks
+// nothing like the symptom the guard above is watching for. But Publication
+// 28 has no primary number written with a pound sign — §213.2 makes # the
+// secondary designator of unspecified type, and secondaryunit claims that
+// token Exact as exactly that — so the number the reading found is the unit,
+// in the one place the standard does not put it. Peeling it moves it; nothing
+// is lost, because the run it came out of is the run being reassigned.
+func primaryWithin(best *address.CandidateAddress, width int) bool {
+	if best.Address.PrimaryNumber == "" {
+		return true
+	}
+	for _, held := range best.Claims {
+		for _, part := range held.Parts {
+			if part.Part == claim.PartPrimaryNumber && part.End() > width {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// unitParts is a numbered secondary designator read off one claim, in the
+// fields Address keeps it in.
+type unitParts struct {
+	designator string
+	number     string
+	detail     string
+}
+
+// leadingUnit is the widest numbered secondary designator or private mailbox
+// starting at the first token, and how many tokens it covers, or a zero width
+// when there is none.
+//
+// Widest first because the vocabularies offer every extent they can support
+// and the longer reading is the one that accounts for more of the input;
+// secondaryunit's own numbered claim is two tokens where privatemailbox's can
+// be three. A designator claimed without a number is not offered here at all
+// — see leadingSecondary for why.
+func leadingUnit(claims []claim.Claim) (unitParts, int) {
+	var best unitParts
+	width := 0
+
+	for _, held := range claims {
+		if held.Start() != 0 || held.End() <= width {
+			continue
+		}
+		var unit unitParts
+		ok := true
+		for _, part := range held.Parts {
+			switch part.Part {
+			case claim.PartSecondaryDesignator:
+				unit.designator = part.Value
+			case claim.PartSecondaryNumber:
+				unit.number = part.Value
+			case claim.PartDetail:
+				unit.detail = part.Value
+			default:
+				ok = false
+			}
+		}
+		if !ok || (unit.number == "" && unit.detail == "") {
+			continue
+		}
+		best, width = unit, held.End()
+	}
+
+	return best, width
 }
 
 // lastLines is the readings of the last line the data leaves standing.
