@@ -526,6 +526,7 @@ func cityAgreement(r reference, postal, city, region string) (agreement, bool) {
 func (p *Parser) choose(r reference, candidates []*address.CandidateAddress) *address.CandidateAddress {
 	type ranked struct {
 		candidate *address.CandidateAddress
+		answers   questionAnswers
 		score     int
 	}
 
@@ -534,14 +535,41 @@ func (p *Parser) choose(r reference, candidates []*address.CandidateAddress) *ad
 		if c == nil || c.Address == nil {
 			continue
 		}
-		var answers []agreement
+		var answers questionAnswers
 		if p.opts.UseReferenceData {
 			answers = p.agreement(r, c.Address)
 		}
-		scored = append(scored, ranked{candidate: c, score: score(c.Confidence, answers)})
+		scored = append(scored, ranked{candidate: c, answers: answers})
 	}
 	if len(scored) == 0 {
 		return nil
+	}
+
+	// A contradicts answer counts against a candidate only when some
+	// competing candidate's answer to that same question is agrees —
+	// go-projectusat#176. zipcity's gaps are real, so a question nothing in
+	// the pile could confirm is exactly as uninformative as one never asked:
+	// a Pub 28 placeholder street like KRYTON TN or a made-up one like
+	// ZQXVBORK must not lose to a candidate that merely declined to ask,
+	// which is what charging an unconfirmed contradicts always did before.
+	// Gating is per question kind rather than per literal zipcity key, since
+	// candidates in one pile are alternate readings of the same input and
+	// rarely share a query string even when they are asking the same
+	// question in spirit. Two candidates that both contradict the same
+	// unconfirmed question (TestStreetContradictionDemotesButStillParses)
+	// are ungated by the same amount, so the tie between them survives
+	// exactly as it did when both were charged -1.
+	var cityConfirmed, streetConfirmed bool
+	for _, s := range scored {
+		if s.answers.city == agrees {
+			cityConfirmed = true
+		}
+		if s.answers.street == agrees {
+			streetConfirmed = true
+		}
+	}
+	for i := range scored {
+		scored[i].score = score(scored[i].candidate.Confidence, scored[i].answers.gated(cityConfirmed, streetConfirmed))
 	}
 
 	sort.SliceStable(scored, func(i, j int) bool {
@@ -679,11 +707,40 @@ const (
 	missingInCity
 )
 
-// agreement asks zipcity every question this reading supports and reports
-// each answer, in the order asked: zip+city first (or city+state, when there
-// is no ZIP Code to pair the city with — see cityZipsAgreement), then the
-// street question, folded from up to two zipcity calls into one answer — see
-// streetAgreement.
+// questionAnswers is one candidate's answers to the two questions choose can
+// ask: the city question (zip+city, or city+state when there is no ZIP —
+// see cityAgreement) and the street question (see streetAgreement). unknown
+// is each field's zero value, which already means "not evidence" throughout
+// this package — see agreement's doc comment — so a question this reading
+// never qualified to ask needs no separate flag.
+type questionAnswers struct {
+	city, street agreement
+}
+
+// gated reports qa's answers as score should see them: a contradicts stands
+// only when the matching confirmed flag says some competing candidate's
+// answer to that same question was agrees. Without that competitor, "zipcity
+// never saw this" is indistinguishable from a gap in the data, so it must
+// cost nothing, exactly like a question this reading never asked —
+// go-projectusat#176.
+func (qa questionAnswers) gated(cityConfirmed, streetConfirmed bool) []agreement {
+	return []agreement{
+		gateOne(qa.city, cityConfirmed),
+		gateOne(qa.street, streetConfirmed),
+	}
+}
+
+func gateOne(ans agreement, confirmed bool) agreement {
+	if ans == contradicts && !confirmed {
+		return unknown
+	}
+	return ans
+}
+
+// agreement asks zipcity every question this reading supports: the city
+// question first (zip+city, or city+state, when there is no ZIP Code to pair
+// the city with — see cityZipsAgreement), then the street question, folded
+// from up to two zipcity calls into one answer — see streetAgreement.
 //
 // Every answer is evidence, and none of them are symmetric. zipcity answers
 // from bloom filters built at a 0.005 false positive rate (the rate is set in
@@ -698,18 +755,21 @@ const (
 // A contradiction is likewise not proof the address is wrong. zipcity is built
 // from Census TIGER files with documented gaps, so a real address the Census
 // missed lands here too. That is why every answer is one point of score
-// rather than rejection, and why UseReferenceData is off by default.
-func (p *Parser) agreement(r reference, a *address.Address) []agreement {
-	var answers []agreement
+// rather than rejection, and why UseReferenceData is off by default — and,
+// since go-projectusat#176, why choose only charges a contradicts when some
+// competing candidate's agrees on the same question shows the gap is the
+// address's and not the data's — see choose's gating of questionAnswers.
+func (p *Parser) agreement(r reference, a *address.Address) questionAnswers {
+	var qa questionAnswers
 
 	if ans, ok := cityAgreement(r, a.Postal, a.City, a.Region); ok {
-		answers = append(answers, ans)
+		qa.city = ans
 	}
 	if ans, ok := streetAgreement(r, a); ok {
-		answers = append(answers, ans)
+		qa.street = ans
 	}
 
-	return answers
+	return qa
 }
 
 // reference answers each distinct zipcity question once per choice. The
