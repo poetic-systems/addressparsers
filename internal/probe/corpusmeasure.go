@@ -31,10 +31,15 @@ func main() {
 	for _, s := range suites {
 		results := parsertest.Run(p, s.cases)
 		pass, settled, total := parsertest.CountPass(results)
-		fmt.Printf("%s: %d/%d/%d (pass/settled/total)\n", s.name, pass, settled, total)
+		fpass, fsettled, _ := parsertest.CountPassFields(results)
+		fmt.Printf("%s: %d/%d/%d (pass/settled/total)\n", s.name, pass+fpass, settled+fsettled, total)
 		for _, r := range results {
-			if r.Settled() && !r.Pass() {
-				fmt.Printf("  FAIL [%s] %q\n    want: %q\n    got:  %q (err=%v)\n", r.Case.Source, r.Case.Input, r.Case.Want, r.Got, r.Err)
+			if !r.Pass() {
+				if r.Settled() {
+					fmt.Printf("  FAIL [%s] %q\n    want: %q\n    got:  %q\n    parsed: %q\n   (err=%v)\n", r.Case.Source, r.Case.Input, r.Case.Want, r.Got, r.GotFields, r.Err)
+				} else if r.SettledFields() {
+					fmt.Printf("  FAIL [%s] %q\n    want: %q\n    got:  %q (err=%v)\n", r.Case.Source, r.Case.Input, r.Case.WantFields, r.GotFields, r.Err)
+				}
 			}
 		}
 	}
