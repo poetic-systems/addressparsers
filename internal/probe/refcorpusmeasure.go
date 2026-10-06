@@ -32,7 +32,7 @@ func main() {
 		fmt.Printf("%s: %d/%d/%d (pass/settled/total)\n", s.name, pass, settled, total)
 		for _, r := range results {
 			if !r.Pass() {
-				want := fmt.Sprintf("%q", r.Case.Want)
+				want := fmt.Sprintf("%s", r.Case.Want)
 				if !r.Settled() {
 					want = fmt.Sprintf("%q", r.Case.WantFields)
 				}
