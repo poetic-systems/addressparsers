@@ -81,12 +81,13 @@ type Options struct {
 	RejectUnknownZipStreet bool
 }
 
-// Verifier returns a parser.AddressVerifier applying opts.
+// Verifier returns a parser.AddressVerifier applying opts, consulting zc for
+// every check it enables.
 //
 // The verifier returns the address unchanged when every enabled check passes
 // or cannot be run, and ErrAbsent when one of them is definitively false. It
 // never modifies the address.
-func Verifier(opts Options) parser.AddressVerifier {
+func Verifier(zc *zipcity.ZipCity, opts Options) parser.AddressVerifier {
 	return func(a *address.Address) (*address.Address, error) {
 		if a == nil {
 			return nil, fmt.Errorf("zipcityverify: %w", errors.New("nil address"))
@@ -100,7 +101,7 @@ func Verifier(opts Options) parser.AddressVerifier {
 		}
 
 		if opts.RejectUnknownZipCity && a.City != "" {
-			present, err := zipcity.CheckZipAndCity(zip, a.City)
+			present, err := zc.CheckZipAndCity(zip, a.City)
 			if err != nil {
 				// zipcity rejected the inputs rather than the pairing. That is
 				// a question this verifier cannot answer, not a failed answer.
@@ -112,7 +113,7 @@ func Verifier(opts Options) parser.AddressVerifier {
 		}
 
 		if opts.RejectUnknownZipStreet && a.StreetName != "" {
-			present, err := zipcity.CheckZipAndStreet(zip, a.StreetName)
+			present, err := zc.CheckZipAndStreet(zip, a.StreetName)
 			if err != nil {
 				return a, nil
 			}

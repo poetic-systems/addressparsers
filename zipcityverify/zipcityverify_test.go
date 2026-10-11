@@ -6,6 +6,7 @@ import (
 
 	"github.com/PortobelloAuth/go-projectusat/pkg/address"
 	"github.com/poetic-systems/addressparsers/zipcityverify"
+	"github.com/poetic-systems/zipcity"
 )
 
 // The ZIP and city used here are the ones zipcity's own README works through,
@@ -16,8 +17,17 @@ const (
 	realCity = "WEST JORDAN"
 )
 
+func mustZipCity(t *testing.T) *zipcity.ZipCity {
+	t.Helper()
+	zc, err := zipcity.New()
+	if err != nil {
+		t.Fatalf("zipcity.New(): %v", err)
+	}
+	return zc
+}
+
 func TestAPairingInTheDataIsNotRejected(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{RejectUnknownZipCity: true})
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{RejectUnknownZipCity: true})
 
 	a := &address.Address{City: realCity, Region: "UT", Postal: realZip}
 	got, err := verify(a)
@@ -30,7 +40,7 @@ func TestAPairingInTheDataIsNotRejected(t *testing.T) {
 }
 
 func TestAPairingAbsentFromTheDataIsRejected(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{RejectUnknownZipCity: true})
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{RejectUnknownZipCity: true})
 
 	// An invented city name, so that the miss is a property of the reading and
 	// not of a gap in the reference data.
@@ -41,7 +51,7 @@ func TestAPairingAbsentFromTheDataIsRejected(t *testing.T) {
 }
 
 func TestTheZeroOptionsCheckNothing(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{})
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{})
 
 	a := &address.Address{City: "NOT A REAL MUNICIPALITY ANYWHERE", Region: "UT", Postal: realZip}
 	if _, err := verify(a); err != nil {
@@ -50,7 +60,7 @@ func TestTheZeroOptionsCheckNothing(t *testing.T) {
 }
 
 func TestAnAddressWithNoUsableZipIsNotChecked(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{
 		RejectUnknownZipCity:   true,
 		RejectUnknownZipStreet: true,
 	})
@@ -64,7 +74,7 @@ func TestAnAddressWithNoUsableZipIsNotChecked(t *testing.T) {
 }
 
 func TestAZipPlusFourIsNarrowedToItsFirstFiveDigits(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{RejectUnknownZipCity: true})
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{RejectUnknownZipCity: true})
 
 	for _, postal := range []string{realZip + "-1234", realZip + "1234"} {
 		a := &address.Address{City: realCity, Postal: postal}
@@ -75,7 +85,7 @@ func TestAZipPlusFourIsNarrowedToItsFirstFiveDigits(t *testing.T) {
 }
 
 func TestTheErrorCarriesNoPartOfTheAddress(t *testing.T) {
-	verify := zipcityverify.Verifier(zipcityverify.Options{RejectUnknownZipCity: true})
+	verify := zipcityverify.Verifier(mustZipCity(t), zipcityverify.Options{RejectUnknownZipCity: true})
 
 	secret := "NOT A REAL MUNICIPALITY ANYWHERE"
 	a := &address.Address{City: secret, Region: "UT", Postal: realZip}
