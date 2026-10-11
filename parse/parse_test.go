@@ -24,6 +24,19 @@ import (
 // left to a caller to discover.
 var _ parser.ParsingFunc = (*parse.Parser)(nil)
 
+// mustNewParser builds a Parser or fails the test, since New now builds its
+// own zipcity.ZipCity and that construction can fail. Centralizing the check
+// here keeps every other test's call site reading the same as it did before
+// New returned an error.
+func mustNewParser(t *testing.T, opts parse.Options) *parse.Parser {
+	t.Helper()
+	p, err := parse.New(opts)
+	if err != nil {
+		t.Fatalf("parse.New(%+v): %v", opts, err)
+	}
+	return p
+}
+
 func TestItReadsTheSpecialAddressFormats(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -54,7 +67,7 @@ func TestItReadsTheSpecialAddressFormats(t *testing.T) {
 		},
 	}
 
-	p := parse.New(parse.Options{})
+	p := mustNewParser(t, parse.Options{})
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a, err := p.Parse(c.source)
@@ -95,7 +108,7 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 		{"PMB 234\n123 MAIN ST\nHERNDON VA 22071", "123 MAIN ST PMB 234"},
 	}
 
-	p := parse.New(parse.Options{})
+	p := mustNewParser(t, parse.Options{})
 	for _, c := range cases {
 		t.Run(c.street, func(t *testing.T) {
 			a, err := p.Parse(c.source)
@@ -121,8 +134,8 @@ func TestItReadsTheOrdinaryStreetLine(t *testing.T) {
 func TestReferenceDataDoesNotAdjudicateAPuertoRicoStreetLine(t *testing.T) {
 	source := "A17 CALLE 1\nSAN JUAN PR"
 
-	without := parse.New(parse.Options{})
-	withData := parse.New(parse.Options{UseReferenceData: true})
+	without := mustNewParser(t, parse.Options{})
+	withData := mustNewParser(t, parse.Options{UseReferenceData: true})
 
 	a1, err := without.Parse(source)
 	if err != nil {
@@ -142,7 +155,7 @@ func TestReferenceDataDoesNotAdjudicateAPuertoRicoStreetLine(t *testing.T) {
 }
 
 func TestEmptyInputHasNoReading(t *testing.T) {
-	p := parse.New(parse.Options{})
+	p := mustNewParser(t, parse.Options{})
 
 	for _, source := range []string{"", "   ", "\n"} {
 		if _, err := p.Parse(source); !errors.Is(err, parse.ErrNoReading) {
@@ -157,7 +170,7 @@ func TestEmptyInputHasNoReading(t *testing.T) {
 func TestReferenceDataDemotesButDoesNotReject(t *testing.T) {
 	source := "PO BOX 11890\nNOT A REAL MUNICIPALITY UT 84088"
 
-	withData := parse.New(parse.Options{UseReferenceData: true})
+	withData := mustNewParser(t, parse.Options{UseReferenceData: true})
 	a, err := withData.Parse(source)
 	if err != nil {
 		t.Fatalf("a contradicted reading must still parse: %v", err)
@@ -172,11 +185,11 @@ func TestReferenceDataDemotesButDoesNotReject(t *testing.T) {
 func TestAgreementDoesNotChangeTheChosenReading(t *testing.T) {
 	source := "PO BOX 11890\nWEST JORDAN UT 84088"
 
-	plain, err := parse.New(parse.Options{}).Parse(source)
+	plain, err := mustNewParser(t, parse.Options{}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing without reference data: %v", err)
 	}
-	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing with reference data: %v", err)
 	}
@@ -186,7 +199,7 @@ func TestAgreementDoesNotChangeTheChosenReading(t *testing.T) {
 }
 
 func TestTheErrorCarriesNoPartOfTheInput(t *testing.T) {
-	p := parse.New(parse.Options{})
+	p := mustNewParser(t, parse.Options{})
 
 	// No last line, so no address type can read it.
 	source := "123 INVENTED LANE\nNOT A REAL MUNICIPALITY"
@@ -342,7 +355,8 @@ func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
 		Postal:          "84088",
 	}
 
-	ans, ok := parse.StreetAgreement(a)
+	p := mustNewParser(t, parse.Options{})
+	ans, ok := p.StreetAgreement(a)
 	if !ok {
 		t.Fatal("want a question asked")
 	}
@@ -358,6 +372,8 @@ func TestStreetAgreementAsksZipAndStreetWhenAZipIsPresent(t *testing.T) {
 // state is absent, and the two together show the city-state path is what
 // answered, not a decline that happened to look like one.
 func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
+	p := mustNewParser(t, parse.Options{})
+
 	real := &address.Address{
 		Type:         &ordinarystreet.OrdinaryStreetAddress{},
 		StreetName:   "PLEASANT HILL",
@@ -365,7 +381,7 @@ func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
 		City:         "PLEASANT HILL",
 		Region:       "CA",
 	}
-	if ans, ok := parse.StreetAgreement(real); !ok || ans != parse.Agrees {
+	if ans, ok := p.StreetAgreement(real); !ok || ans != parse.Agrees {
 		t.Errorf("StreetAgreement(real street) = %v, %v, want Agrees, true", ans, ok)
 	}
 
@@ -376,7 +392,7 @@ func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
 		City:         "PLEASANT HILL",
 		Region:       "CA",
 	}
-	if ans, ok := parse.StreetAgreement(absent); !ok || ans != parse.Contradicts {
+	if ans, ok := p.StreetAgreement(absent); !ok || ans != parse.Contradicts {
 		t.Errorf("StreetAgreement(absent street) = %v, %v, want Contradicts, true", ans, ok)
 	}
 }
@@ -386,13 +402,15 @@ func TestStreetAgreementFallsBackToCityAndStateWithNoZip(t *testing.T) {
 // Code present means zipCityAgreement's stronger question is the one to ask
 // — and only when there is a two-letter region to ask it of.
 func TestCityZipsAgreementAsksTheStateWhenThereIsNoZip(t *testing.T) {
+	p := mustNewParser(t, parse.Options{})
+
 	real := &address.Address{City: "WEST PALM BEACH", Region: "FL"}
-	if ans, ok := parse.CityZipsAgreement(real); !ok || ans != parse.Agrees {
+	if ans, ok := p.CityZipsAgreement(real); !ok || ans != parse.Agrees {
 		t.Errorf("CityZipsAgreement(real city) = %v, %v, want Agrees, true", ans, ok)
 	}
 
 	absent := &address.Address{City: "ST WEST PALM BEACH", Region: "FL"}
-	if ans, ok := parse.CityZipsAgreement(absent); !ok || ans != parse.Contradicts {
+	if ans, ok := p.CityZipsAgreement(absent); !ok || ans != parse.Contradicts {
 		t.Errorf("CityZipsAgreement(absent city) = %v, %v, want Contradicts, true", ans, ok)
 	}
 
@@ -401,7 +419,7 @@ func TestCityZipsAgreementAsksTheStateWhenThereIsNoZip(t *testing.T) {
 		"without region": {City: "WEST PALM BEACH"},
 		"without city":   {Region: "FL"},
 	} {
-		if ans, ok := parse.CityZipsAgreement(a); ok {
+		if ans, ok := p.CityZipsAgreement(a); ok {
 			t.Errorf("CityZipsAgreement(%s) = %v, true; want it to decline", name, ans)
 		}
 	}
@@ -415,7 +433,7 @@ func TestCityZipsAgreementAsksTheStateWhenThereIsNoZip(t *testing.T) {
 // the two real places behind it — which of those two is not the data's
 // call here, since both are real.
 func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
-	withData := parse.New(parse.Options{UseReferenceData: true})
+	withData := mustNewParser(t, parse.Options{UseReferenceData: true})
 
 	a, err := withData.Parse("123 NORTH PARK ST PAUL MN")
 	if err != nil {
@@ -454,7 +472,7 @@ func TestTheDataSplitsAnUnmarkedCityWithNoZip(t *testing.T) {
 // one-line form read NORTH PARK. Which decomposition is right cannot be had
 // from the string; #24 leaves it to the street window in #17 step 7.
 func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
-	withData := parse.New(parse.Options{UseReferenceData: true})
+	withData := mustNewParser(t, parse.Options{UseReferenceData: true})
 
 	for _, tc := range []struct {
 		why                     string
@@ -486,7 +504,7 @@ func TestBothReadingsOfTheSaintStreetAmbiguityAreReachable(t *testing.T) {
 // over the accepted claims — flattens every reading of the street line to the
 // city's own confidence, so enumeration order picked the street instead.
 func TestACommaDoesNotChangeTheStreet(t *testing.T) {
-	withData := parse.New(parse.Options{UseReferenceData: true})
+	withData := mustNewParser(t, parse.Options{UseReferenceData: true})
 
 	for _, marked := range []string{
 		"123 OCEAN BOULEVARD, WEST PALM BEACH, FL",
@@ -546,6 +564,7 @@ func TestStreetConfidenceReadsTheStreetAndNothingElse(t *testing.T) {
 // street zipcity was ever asked about — so StreetAgreement must decline
 // rather than manufacture a contradiction on every one of them.
 func TestStreetAgreementDeclinesForClosedForms(t *testing.T) {
+	p := mustNewParser(t, parse.Options{})
 	a := &address.Address{
 		Type:          &pobox.POBoxAddress{},
 		StreetName:    "PO BOX",
@@ -555,7 +574,7 @@ func TestStreetAgreementDeclinesForClosedForms(t *testing.T) {
 		Postal:        "84088",
 	}
 
-	if _, ok := parse.StreetAgreement(a); ok {
+	if _, ok := p.StreetAgreement(a); ok {
 		t.Error("want the question declined for a closed form")
 	}
 }
@@ -563,6 +582,7 @@ func TestStreetAgreementDeclinesForClosedForms(t *testing.T) {
 // A reading with no street name at all — an ordinarystreet candidate the
 // vocabularies left empty — has nothing to ask zipcity about.
 func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
+	p := mustNewParser(t, parse.Options{})
 	a := &address.Address{
 		Type:   &ordinarystreet.OrdinaryStreetAddress{},
 		City:   "WEST JORDAN",
@@ -570,7 +590,7 @@ func TestStreetAgreementDeclinesWithNoStreetName(t *testing.T) {
 		Postal: "84088",
 	}
 
-	if _, ok := parse.StreetAgreement(a); ok {
+	if _, ok := p.StreetAgreement(a); ok {
 		t.Error("want the question declined with no street name")
 	}
 }
@@ -595,7 +615,8 @@ func TestStreetAgreementAnswersForPuertoRico(t *testing.T) {
 		Region:     "PR",
 	}
 
-	got, ok := parse.StreetAgreement(pr)
+	p := mustNewParser(t, parse.Options{})
+	got, ok := p.StreetAgreement(pr)
 	if !ok {
 		t.Fatal("want the street question asked of a puertorico reading")
 	}
@@ -606,7 +627,7 @@ func TestStreetAgreementAnswersForPuertoRico(t *testing.T) {
 	// The point of asking is that the two readings of one street line get the
 	// same answer, so neither is ranked above the other by a question only one
 	// of them was asked.
-	same, ok := parse.StreetAgreement(ordinary)
+	same, ok := p.StreetAgreement(ordinary)
 	if !ok || same != got {
 		t.Errorf("ordinarystreet reading of the same street: want (%v, true), got (%v, %v)", got, same, ok)
 	}
@@ -629,7 +650,7 @@ func TestStreetAgreementAnswersForPuertoRico(t *testing.T) {
 func TestStreetContradictionDemotesButStillParses(t *testing.T) {
 	source := "123 ZQXVBORK\nWEST JORDAN UT 84088"
 
-	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 	if err != nil {
 		t.Fatalf("a street-contradicted reading must still parse: %v", err)
 	}
@@ -647,11 +668,11 @@ func TestStreetContradictionDemotesButStillParses(t *testing.T) {
 func TestStreetAgreementDoesNotChangeAnUnambiguousReading(t *testing.T) {
 	source := "BROADWAY\nNEW YORK NY 10012"
 
-	plain, err := parse.New(parse.Options{}).Parse(source)
+	plain, err := mustNewParser(t, parse.Options{}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing without reference data: %v", err)
 	}
-	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing with reference data: %v", err)
 	}
@@ -669,7 +690,7 @@ func TestAgreementCannotLiftAnAbsorbedReadingPastTheSplitOne(t *testing.T) {
 	source := "1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500"
 
 	for _, opts := range []parse.Options{{}, {UseReferenceData: true}} {
-		a, err := parse.New(opts).Parse(source)
+		a, err := mustNewParser(t, opts).Parse(source)
 		if err != nil {
 			t.Fatalf("parsing with %+v: %v", opts, err)
 		}
@@ -745,7 +766,8 @@ func TestStreetAgreementAsksBothQuestionsWhenItCan(t *testing.T) {
 		Postal:          "20500",
 	}
 
-	ans, ok := parse.StreetAgreement(a)
+	p := mustNewParser(t, parse.Options{})
+	ans, ok := p.StreetAgreement(a)
 	if !ok {
 		t.Fatal("want a question asked")
 	}
@@ -773,16 +795,16 @@ func TestASplitStreetAnswerTakesNoStep(t *testing.T) {
 		Region:          "DC",
 		Postal:          "20500",
 	}
-	if ans, ok := parse.StreetAgreement(a); !ok || ans != parse.MissingInZip {
+	if ans, ok := mustNewParser(t, parse.Options{}).StreetAgreement(a); !ok || ans != parse.MissingInZip {
 		t.Fatalf("StreetAgreement = %v, %v, want MissingInZip, true", ans, ok)
 	}
 
 	source := "1600 WISCONSIN AVE NW\nWASHINGTON DC 20500"
-	plain, err := parse.New(parse.Options{}).Parse(source)
+	plain, err := mustNewParser(t, parse.Options{}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing without reference data: %v", err)
 	}
-	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing with reference data: %v", err)
 	}
@@ -828,7 +850,7 @@ func TestStreetForQueryAsksTheStreetThatWillBeEmitted(t *testing.T) {
 // the street they would emit, neither is a street zipcity has, nothing is
 // promoted, and the grammar keeps EAST as the name.
 func TestADirectionalStreetNameIsNotTradedForAnAbsorbedReading(t *testing.T) {
-	p := parse.New(parse.Options{UseReferenceData: true})
+	p := mustNewParser(t, parse.Options{UseReferenceData: true})
 
 	directional, err := p.Parse("100 EAST ST NW, WASHINGTON, DC 20004")
 	if err != nil {
@@ -874,7 +896,7 @@ func TestALeadingSecondaryDesignatorMovesAfterTheStreet(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.street, func(t *testing.T) {
 			for _, ref := range []bool{false, true} {
-				a, err := parse.New(parse.Options{UseReferenceData: ref}).Parse(c.source)
+				a, err := mustNewParser(t, parse.Options{UseReferenceData: ref}).Parse(c.source)
 				if err != nil {
 					t.Fatalf("reference data %v: %v", ref, err)
 				}
@@ -903,7 +925,7 @@ func TestALeadingSecondaryLeavesAnAddressThatMeansWhatItSaysAlone(t *testing.T) 
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			a, err := parse.New(parse.Options{}).Parse(c.source)
+			a, err := mustNewParser(t, parse.Options{}).Parse(c.source)
 			if err != nil {
 				t.Fatalf("parsing: %v", err)
 			}
@@ -926,7 +948,7 @@ func TestALeadingSecondaryLeavesAnAddressThatMeansWhatItSaysAlone(t *testing.T) 
 func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
 	source := "UCENT Building Suite 480 411 N Central Ave\nTAMPA FL 33602"
 
-	plain, err := parse.New(parse.Options{}).Parse(source)
+	plain, err := mustNewParser(t, parse.Options{}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing without reference data: %v", err)
 	}
@@ -934,7 +956,7 @@ func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
 		t.Errorf("without reference data: street line = %q, want the grammar's whole-run reading", got)
 	}
 
-	withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 	if err != nil {
 		t.Fatalf("parsing with reference data: %v", err)
 	}
@@ -954,11 +976,11 @@ func TestTheStreetWindowLeavesAStreetTheDataDoesNotKnowWhereItIs(t *testing.T) {
 		"152 South Tech Dr\nTAMPA FL 33602",
 		"Some Firm Name 152 South Tech Dr\nTAMPA FL 33602",
 	} {
-		plain, err := parse.New(parse.Options{}).Parse(source)
+		plain, err := mustNewParser(t, parse.Options{}).Parse(source)
 		if err != nil {
 			t.Fatalf("parsing %q without reference data: %v", source, err)
 		}
-		withData, err := parse.New(parse.Options{UseReferenceData: true}).Parse(source)
+		withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
 		if err != nil {
 			t.Fatalf("parsing %q with reference data: %v", source, err)
 		}
