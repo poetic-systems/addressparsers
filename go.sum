@@ -1,5 +1,7 @@
 github.com/PortobelloAuth/go-projectusat v0.1.0-alpha.0.0.20261011071020-4b94b69c3c9e h1:4y+pkBPPBVjQo6AedJFetw5wFsV46U+tSFc/JTnII28=
 github.com/PortobelloAuth/go-projectusat v0.1.0-alpha.0.0.20261011071020-4b94b69c3c9e/go.mod h1:KsDSfvZj988SA3XyuSwNYX3UE2uRjnHe7VDvVxOyOS0=
+github.com/PortobelloAuth/go-projectusat v0.1.0-alpha.1 h1:xDGq97kVHDOZITphSpFDMzWgaem26O67kZoA1TgwBEU=
+github.com/PortobelloAuth/go-projectusat v0.1.0-alpha.1/go.mod h1:K1G8133gpFIyP462OwLri3XGBlsfEIBmTb4r1J7zDq0=
 github.com/anyascii/go v0.3.3 h1:A3BhW92hXPYPb8Y1+zLOip8xjSxNcdl1FaxzTmFxrhs=
 github.com/anyascii/go v0.3.3/go.mod h1:HDvbMmSpqJyIe+xtSkHmAYTjc8PzvO3l1Jmgx/IFUPs=
 github.com/bits-and-blooms/bitset v1.24.2/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
@@ -13,6 +15,8 @@ github.com/poetic-systems/addresstables v0.1.0-alpha.0 h1:bsPfgfImKRoTXjUO9pzy+p
 github.com/poetic-systems/addresstables v0.1.0-alpha.0/go.mod h1:0+0MslI2VD30//JsNgvjPLz04GiV6YEsFE2pni512Fs=
 github.com/poetic-systems/zipcity v0.1.0-alpha.1 h1:QnN4x8M9BV05HqY6Df+Q10pF8+8ZnwGHiCTCTdl5Usk=
 github.com/poetic-systems/zipcity v0.1.0-alpha.1/go.mod h1:wqkYtdCgWdJftdXLN8nk9EOOdyCo07sQ0068a53Kpdo=
+github.com/poetic-systems/zipcity v0.1.0-alpha.2 h1:WF3HccpZmItEG099iefi9GJcYx80ycQMYmWkTHWYov8=
+github.com/poetic-systems/zipcity v0.1.0-alpha.2/go.mod h1:wqkYtdCgWdJftdXLN8nk9EOOdyCo07sQ0068a53Kpdo=
 github.com/twmb/murmur3 v1.1.8 h1:8Yt9taO/WN3l08xErzjeschgZU2QSrwm1kclYq+0aRg=
 github.com/twmb/murmur3 v1.1.8/go.mod h1:Qq/R7NUyOfr65zD+6Q5IHKsJLwP7exErjN6lyyq3OSQ=
 golang.org/x/text v0.41.0 h1:vz/seA0lnX87Othu2f/0L24RcgrXD9/YFTSuGjj3rH8=
