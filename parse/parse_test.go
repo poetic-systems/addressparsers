@@ -24,7 +24,7 @@ import (
 // left to a caller to discover.
 var _ parser.ParsingFunc = (*parse.Parser)(nil)
 
-// mustNewParser builds a Parser or fails the test, since New now builds its
+// mustNewParser builds a Parser or fails the test, since New can build its
 // own zipcity.ZipCity and that construction can fail. Centralizing the check
 // here keeps every other test's call site reading the same as it did before
 // New returned an error.
@@ -35,6 +35,28 @@ func mustNewParser(t *testing.T, opts parse.Options) *parse.Parser {
 		t.Fatalf("parse.New(%+v): %v", opts, err)
 	}
 	return p
+}
+
+// A caller that passes its own ZipCity must get the same reading as one that
+// lets New build one, so sharing an instance is purely a resource choice.
+func TestASuppliedZipCityReadsTheSameAsABuiltOne(t *testing.T) {
+	zc, err := zipcity.New()
+	if err != nil {
+		t.Fatalf("zipcity.New: %v", err)
+	}
+	source := "PO BOX 11890\nWEST JORDAN UT 84088"
+
+	built, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with a built ZipCity: %v", err)
+	}
+	supplied, err := mustNewParser(t, parse.Options{UseReferenceData: true, ZipCity: zc}).Parse(source)
+	if err != nil {
+		t.Fatalf("parsing with a supplied ZipCity: %v", err)
+	}
+	if !built.Equals(supplied) {
+		t.Errorf("a supplied ZipCity changed the reading:\n built    = %+v\n supplied = %+v", built, supplied)
+	}
 }
 
 func TestItReadsTheSpecialAddressFormats(t *testing.T) {

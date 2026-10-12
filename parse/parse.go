@@ -101,6 +101,11 @@ type Options struct {
 	// and its answers depend only on the input, which is what makes its
 	// behaviour reproducible from the specification alone.
 	UseReferenceData bool
+
+	// ZipCity is the reference data instance to consult. A caller that also
+	// queries zipcity itself passes its own here so both share one set of
+	// decoded filters and one match cache. Nil makes New create one.
+	ZipCity *zipcity.ZipCity
 }
 
 // Parser reads a free text address.
@@ -111,9 +116,12 @@ type Parser struct {
 
 // New returns a Parser applying opts.
 func New(opts Options) (*Parser, error) {
-	zc, err := zipcity.New()
-	if err != nil {
-		return nil, err
+	zc := opts.ZipCity
+	if zc == nil {
+		var err error
+		if zc, err = zipcity.New(); err != nil {
+			return nil, err
+		}
 	}
 
 	return &Parser{opts: opts, zipcity: zc}, nil
