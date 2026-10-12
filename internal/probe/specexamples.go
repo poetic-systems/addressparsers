@@ -131,7 +131,11 @@ var groups = []group{
 var lastLinePattern = regexp.MustCompile(`\b[A-Z]{2},? [0-9]{5}(-[0-9]{4})?$`)
 
 func main() {
-	p := parse.New(parse.Options{})
+	p, err := parse.New(parse.Options{})
+	if err != nil {
+		panic(err)
+	}
+
 	opts := []goprojectusat.USAtNormalizeOption{
 		goprojectusat.WithCustomAddressParser(p),
 		goprojectusat.WithContentNormalization(),

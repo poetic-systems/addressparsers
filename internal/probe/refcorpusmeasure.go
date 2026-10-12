@@ -15,7 +15,10 @@ import (
 )
 
 func main() {
-	p := parse.New(parse.Options{UseReferenceData: true})
+	p, err := parse.New(parse.Options{UseReferenceData: true})
+	if err != nil {
+		panic(err)
+	}
 
 	suites := []struct {
 		name  string

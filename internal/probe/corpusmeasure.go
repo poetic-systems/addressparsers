@@ -17,7 +17,10 @@ import (
 )
 
 func main() {
-	p := parse.New(parse.Options{})
+	p, err := parse.New(parse.Options{})
+	if err != nil {
+		panic(err)
+	}
 
 	suites := []struct {
 		name  string

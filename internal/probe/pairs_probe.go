@@ -18,7 +18,11 @@ import (
 )
 
 func main() {
-	p := parse.New(parse.Options{UseReferenceData: true})
+	p, err := parse.New(parse.Options{UseReferenceData: true})
+	if err != nil {
+		panic(err)
+	}
+
 	for _, in := range []string{
 		"123 MAIN ST WEST, PALM BEACH, FL 33480",
 		"123 MAIN ST, WEST PALM BEACH, FL 33401",

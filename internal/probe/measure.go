@@ -27,6 +27,11 @@ type tc struct {
 }
 
 func main() {
+	zc, err := zipcity.New()
+	if err != nil {
+		panic(err)
+	}
+
 	cases := []tc{
 		{"spec: 1600 Pennsylvania Ave NW (public, non-residential)", "1600 PENNSYLVANIA AVE NW\nWASHINGTON DC 20500"},
 		{"spec p.26: 1234 Ave Ashford, Puerto Rico", "1234 AVE ASHFORD\nSAN JUAN PR 00907"},
@@ -40,8 +45,16 @@ func main() {
 	for _, c := range cases {
 		fmt.Printf("=== %s ===\nsource: %q\n", c.name, c.source)
 
-		plain, errPlain := parse.New(parse.Options{}).Parse(c.source)
-		withData, errData := parse.New(parse.Options{UseReferenceData: true}).Parse(c.source)
+		pplain, err := parse.New(parse.Options{})
+		if err != nil {
+			panic(err)
+		}
+		plain, errPlain := pplain.Parse(c.source)
+		pdata, err := parse.New(parse.Options{UseReferenceData: true})
+		if err != nil {
+			panic(err)
+		}
+		withData, errData := pdata.Parse(c.source)
 
 		fmt.Printf("  plain:     %s (err=%v)\n", describe(plain), errPlain)
 		fmt.Printf("  reference: %s (err=%v)\n", describe(withData), errData)
@@ -54,22 +67,22 @@ func main() {
 	// Direct zipcity probes for the discriminating pairs, showing the raw
 	// evidence the table above is built from.
 	fmt.Println("=== direct zipcity probes ===")
-	probeZipStreet("00907", "AVE ASHFORD")      // spec form: false
-	probeZipStreet("00907", "AVENIDA ASHFORD")  // Pub28/data form: true
-	probeZipStreet("00907", "AVENUE ASHFORD")   // go-projectusat#95's output: false
-	probeZipStreet("30033", "N DECATUR RD")     // true: predirectional reading
-	probeZipStreet("30033", "NORTH DECATUR RD") // false: name-absorbed reading
-	probeZipStreet("84088", "ZQXVBORK")         // false: invented street
-	probeCityStateStreet("PLEASANT HILL", "CA", "PLEASANT HILL RD")
+	probeZipStreet(zc, "00907", "AVE ASHFORD")      // spec form: false
+	probeZipStreet(zc, "00907", "AVENIDA ASHFORD")  // Pub28/data form: true
+	probeZipStreet(zc, "00907", "AVENUE ASHFORD")   // go-projectusat#95's output: false
+	probeZipStreet(zc, "30033", "N DECATUR RD")     // true: predirectional reading
+	probeZipStreet(zc, "30033", "NORTH DECATUR RD") // false: name-absorbed reading
+	probeZipStreet(zc, "84088", "ZQXVBORK")         // false: invented street
+	probeCityStateStreet(zc, "PLEASANT HILL", "CA", "PLEASANT HILL RD")
 }
 
-func probeZipStreet(zip, street string) {
-	present, err := zipcity.CheckZipAndStreet(zip, street)
+func probeZipStreet(zc *zipcity.ZipCity, zip, street string) {
+	present, err := zc.CheckZipAndStreet(zip, street)
 	fmt.Printf("  CheckZipAndStreet(%q, %q) = %v (err=%v)\n", zip, street, present, err)
 }
 
-func probeCityStateStreet(city, state, street string) {
-	present, err := zipcity.CheckCityStateAndStreet(city, state, street)
+func probeCityStateStreet(zc *zipcity.ZipCity, city, state, street string) {
+	present, err := zc.CheckCityStateAndStreet(city, state, street)
 	fmt.Printf("  CheckCityStateAndStreet(%q, %q, %q) = %v (err=%v)\n", city, state, street, present, err)
 }
 

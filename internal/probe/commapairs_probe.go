@@ -22,8 +22,12 @@ import (
 )
 
 func main() {
+	p, err := parse.New(parse.Options{UseReferenceData: true})
+	if err != nil {
+		panic(err)
+	}
 	opts := []goprojectusat.USAtNormalizeOption{
-		goprojectusat.WithCustomAddressParser(parse.New(parse.Options{UseReferenceData: true})),
+		goprojectusat.WithCustomAddressParser(p),
 		goprojectusat.WithContentNormalization(),
 	}
 
