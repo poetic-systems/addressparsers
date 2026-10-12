@@ -940,11 +940,14 @@ func TestALeadingSecondaryLeavesAnAddressThatMeansWhatItSaysAlone(t *testing.T) 
 }
 
 // Step 7 of #17: with the right edge of the street already fixed, the left
-// edge slides right until the data recognizes what is left. zipcity has
-// N CENTRAL AVE in 33602 and does not have UCENT BUILDING SUITE 480 411
-// N CENTRAL AVE, so the window finds the street, step 6's designator comes
-// out of the middle of it, and what the window slid past lands in
-// BusinessName. See streetWindow.
+// edge slides right until something recognizes what is left. Before
+// go-projectusat#201, "STE 480" ahead of a house number could only ever
+// reach Likely confidence (BLDG/SUITE reading), so zipcity confirmation of
+// N CENTRAL AVE in 33602 was what tipped the window into sliding — without
+// reference data, the grammar kept its own ungated, garbled reading. #201's
+// unitNumberAhead fix now gives that claim Strong confidence outright, so
+// the grammar's own ranking resolves it correctly on its own; reference
+// data no longer changes the outcome for this input. See streetWindow.
 func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
 	source := "UCENT Building Suite 480 411 N Central Ave\nTAMPA FL 33602"
 
@@ -952,8 +955,11 @@ func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing without reference data: %v", err)
 	}
-	if got := plain.FormatStreetLine(); got != "UCENT BUILDING SUITE 480 411 N CENTRAL AVE" {
-		t.Errorf("without reference data: street line = %q, want the grammar's whole-run reading", got)
+	if got := plain.FormatStreetLine(); got != "411 N CENTRAL AVE STE 480" {
+		t.Errorf("without reference data: street line = %q, want %q", got, "411 N CENTRAL AVE STE 480")
+	}
+	if plain.BusinessName != "UCENT BUILDING" {
+		t.Errorf("without reference data: BusinessName = %q, want %q", plain.BusinessName, "UCENT BUILDING")
 	}
 
 	withData, err := mustNewParser(t, parse.Options{UseReferenceData: true}).Parse(source)
@@ -963,8 +969,8 @@ func TestTheStreetWindowSlidesPastAFirmWrittenAheadOfTheStreet(t *testing.T) {
 	if got := withData.FormatStreetLine(); got != "411 N CENTRAL AVE STE 480" {
 		t.Errorf("with reference data: street line = %q, want %q", got, "411 N CENTRAL AVE STE 480")
 	}
-	if withData.BusinessName != "UCENT Building" {
-		t.Errorf("BusinessName = %q, want %q", withData.BusinessName, "UCENT Building")
+	if withData.BusinessName != "UCENT BUILDING" {
+		t.Errorf("with reference data: BusinessName = %q, want %q", withData.BusinessName, "UCENT BUILDING")
 	}
 }
 
